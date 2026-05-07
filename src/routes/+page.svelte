@@ -5,13 +5,10 @@
 	import MarketTile from '$lib/components/MarketTile.svelte';
 	import WalletPreview from '$lib/components/WalletPreview.svelte';
 	import TrendingPanel from '$lib/components/TrendingPanel.svelte';
-	import {
-		featuredStory,
-		secondaryStories,
-		marketTickers,
-		walletSnapshot,
-		trendingTopics
-	} from '$lib/placeholder-data';
+	import type { PageData } from './$types';
+
+	type Props = { data: PageData };
+	let { data }: Props = $props();
 </script>
 
 <TopNav active="research" />
@@ -32,18 +29,18 @@
 			</header>
 
 			<!-- Featured research card -->
-			<ResearchCard story={featuredStory} variant="featured" />
+			<ResearchCard story={data.featuredStory} variant="featured" />
 
 			<!-- Secondary cards -->
 			<div class="grid grid-cols-3 gap-4">
-				{#each secondaryStories as story (story.id)}
+				{#each data.secondaryStories as story (story.id)}
 					<ResearchCard {story} />
 				{/each}
 			</div>
 
 			<!-- Market tile strip -->
 			<div class="flex gap-3">
-				{#each marketTickers as ticker (ticker.ticker)}
+				{#each data.marketTickers as ticker (ticker.ticker)}
 					<MarketTile data={ticker} />
 				{/each}
 			</div>
@@ -51,8 +48,8 @@
 
 		<!-- Side rail -->
 		<div class="flex flex-col gap-4">
-			<WalletPreview wallet={walletSnapshot} />
-			<TrendingPanel topics={trendingTopics} />
+			<WalletPreview wallet={data.walletSnapshot} />
+			<TrendingPanel protocols={data.trendingProtocols} />
 		</div>
 	</div>
 </main>

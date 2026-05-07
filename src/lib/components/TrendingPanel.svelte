@@ -1,26 +1,35 @@
 <script lang="ts">
-	import type { TrendingTopic } from '$lib/placeholder-data';
+	import type { TrendingProtocol } from '$lib/placeholder-data';
+	import { formatPctDeltaShort, formatUsdCompact } from '$lib/format';
 
 	type Props = {
-		topics: TrendingTopic[];
+		protocols: TrendingProtocol[];
 	};
 
-	let { topics }: Props = $props();
+	let { protocols }: Props = $props();
 </script>
 
 <aside class="rounded-card border border-border bg-surface p-6 shadow-[0_1px_2px_rgb(0_0_0/0.04)]">
 	<div class="eyebrow mb-4 text-muted">Trending now</div>
 
 	<ul class="flex flex-col gap-3">
-		{#each topics as { topic, mentions } (topic)}
-			<li class="flex items-center justify-between">
+		{#each protocols as { name, slug, tvlUsd, change1dPct } (slug)}
+			{@const isUp = change1dPct >= 0}
+			<li class="flex items-center justify-between gap-3">
 				<a
-					href="/research?topic={encodeURIComponent(topic)}"
-					class="text-sm font-semibold text-ink transition-colors hover:text-positive"
+					href="/research?protocol={encodeURIComponent(slug)}"
+					class="text-sm font-semibold text-ink transition-colors hover:text-positive truncate"
 				>
-					{topic}
+					{name}
 				</a>
-				<span class="text-xs text-muted">{mentions} mentions</span>
+				<div class="flex shrink-0 items-baseline gap-2">
+					<span class="text-xs font-medium text-muted">{formatUsdCompact(tvlUsd)}</span>
+					<span
+						class="text-xs font-semibold {isUp ? 'text-positive' : 'text-negative'}"
+					>
+						{formatPctDeltaShort(change1dPct)}
+					</span>
+				</div>
 			</li>
 		{/each}
 	</ul>

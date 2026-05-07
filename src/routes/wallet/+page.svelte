@@ -1,6 +1,11 @@
 <script lang="ts">
 	import TopNav from '$lib/components/TopNav.svelte';
-	import { walletSnapshot } from '$lib/placeholder-data';
+	import type { PageData } from './$types';
+
+	type Props = { data: PageData };
+	let { data }: Props = $props();
+
+	const wallet = $derived(data.walletSnapshot);
 
 	const actions = [
 		{ label: 'Buy', icon: 'dollar' },
@@ -20,10 +25,16 @@
 	<section class="mb-10 flex flex-col items-center gap-1">
 		<div class="eyebrow text-muted">Total balance</div>
 		<div class="text-[56px] font-extrabold tracking-[-0.05em] text-ink">
-			{walletSnapshot.balanceUsd}
+			{wallet.balanceUsd}
 		</div>
-		<div class="text-sm font-medium text-positive">
-			{walletSnapshot.deltaToday} ({walletSnapshot.deltaTodayPct}%) today
+		<div
+			class="text-sm font-medium {wallet.deltaTodayPct > 0
+				? 'text-positive'
+				: wallet.deltaTodayPct < 0
+					? 'text-negative'
+					: 'text-muted'}"
+		>
+			{wallet.deltaToday} ({wallet.deltaTodayPct.toFixed(2)}%) today
 		</div>
 	</section>
 
@@ -82,7 +93,7 @@
 	<!-- Tab content -->
 	{#if activeTab === 'Tokens'}
 		<section class="flex flex-col">
-			{#each walletSnapshot.tokens as token (token.symbol)}
+			{#each wallet.tokens as token (token.symbol)}
 				<div class="flex items-center gap-4 border-b border-border py-4 last:border-b-0">
 					<span
 						class="flex h-9 w-9 items-center justify-center rounded-full bg-bg text-sm font-bold text-ink"
