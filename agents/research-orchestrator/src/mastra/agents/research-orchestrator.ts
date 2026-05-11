@@ -3,7 +3,7 @@ import { createOpenAI } from '@ai-sdk/openai'
 import { getCoralTools } from '../mcp/coral-mcp-client.js'
 
 const proxyUrl = process.env.CORAL_PROXY_URL_MAIN
-const proxyModel = process.env.CORAL_PROXY_MODEL_MAIN ?? 'anthropic/claude-sonnet-4.6'
+const proxyModel = process.env.CORAL_PROXY_MODEL_MAIN ?? 'gpt-5.4-mini'
 
 // OpenRouter speaks the older `/chat/completions` API only — the `/responses`
 // API that `@ai-sdk/openai` v2 defaults to via `factory(model)` is rejected
