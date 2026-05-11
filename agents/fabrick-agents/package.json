@@ -1,6 +1,6 @@
 {
-  "name": "fabrick-research-orchestrator",
-  "version": "0.1.0",
+  "name": "fabrick-agents",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {

@@ -25,6 +25,7 @@
 	},
 	"dependencies": {
 		"@fontsource-variable/inter": "^5.0.0",
-		"@supabase/supabase-js": "^2.105.3"
+		"@supabase/supabase-js": "^2.105.3",
+		"zod": "^4.4.3"
 	}
 }

@@ -1,9 +1,12 @@
 /**
  * Builders for Coral SessionRequest bodies.
  *
- * For the first roll we ship a single-agent session (just the orchestrator)
- * so we can see the agent loop close end-to-end. Full multi-agent fleets
- * come in a later reroll.
+ * Each agent in our fleet connects to the data sources it needs via real
+ * MCP servers (Coral's MCP for inter-agent coordination, plus Fabrick's
+ * hosted Jupiter / DefiLlama MCPs, and Exa's hosted MCP). No
+ * `customTools` block — we sidestepped that path because Coral v1.2.0's
+ * `GraphAgentTool.outputSchema` defaults to a non-null empty schema that
+ * breaks the agent-side MCP validation. External MCPs avoid the issue.
  */
 
 export type AgentOptionValue =
@@ -25,7 +28,6 @@ export type AgentDeclaration = {
 	blocking?: boolean;
 	systemPrompt?: string;
 	options?: Record<string, AgentOptionValue>;
-	customToolAccess?: string[];
 	annotations?: Record<string, string>;
 };
 
@@ -33,7 +35,6 @@ export type SessionRequest = {
 	agentGraphRequest: {
 		agents: AgentDeclaration[];
 		groups: string[][];
-		customTools?: Record<string, unknown>;
 	};
 	namespaceProvider: {
 		type: 'create_if_not_exists';
@@ -55,20 +56,22 @@ export type SessionRequest = {
 export type OrchestratorRunInput = {
 	sessionSlug: string;
 	userQuery: string;
-	/** TTL in ms — Coral kills the session after this. Defaults to 5 minutes. */
+	/** TTL in ms — Coral kills the session after this. Defaults to 10 minutes. */
 	ttlMs?: number;
 };
 
 /**
- * Build a SessionRequest that spawns *just* the research-orchestrator agent
- * with the user query injected as the `INITIAL_QUERY` option (declared in
- * the agent's coral-agent.toml).
+ * Build a SessionRequest that spawns the 4-agent Fabrick research fleet:
+ *  - research-orchestrator (coordinator, no data tools)
+ *  - token-info-agent (connects to Fabrick's Jupiter MCP)
+ *  - defillama-agent (connects to Fabrick's DefiLlama MCP)
+ *  - exa-agent (connects to Exa's hosted MCP)
  *
- * Namespace name is `fabrick-{slug}-{ts}` so concurrent runs against the
- * same session slug don't collide.
+ * The user's query is injected on the orchestrator via the INITIAL_QUERY
+ * option (declared in its coral-agent.toml).
  */
 export function buildOrchestratorSessionRequest(input: OrchestratorRunInput): SessionRequest {
-	const ttlMs = input.ttlMs ?? 5 * 60 * 1000;
+	const ttlMs = input.ttlMs ?? 10 * 60 * 1000;
 	const ts = Date.now();
 
 	return {
@@ -80,17 +83,55 @@ export function buildOrchestratorSessionRequest(input: OrchestratorRunInput): Se
 						version: '0.1.0',
 						registrySourceId: { type: 'local' }
 					},
-					name: 'orchestrator',
-					description: 'Fabrick deep-research orchestrator',
+					name: 'research-orchestrator',
+					description: 'Fabrick research orchestrator — coordinates and synthesizes',
 					provider: { type: 'local', runtime: 'executable' },
 					blocking: true,
 					options: {
 						INITIAL_QUERY: { type: 'string', value: input.userQuery }
 					},
 					annotations: { role: 'orchestrator', source: 'fabrick' }
+				},
+				{
+					id: {
+						name: 'fabrick-token-info-agent',
+						version: '0.1.0',
+						registrySourceId: { type: 'local' }
+					},
+					name: 'token-info-agent',
+					description: 'Solana SPL token prices and metadata via Jupiter MCP',
+					provider: { type: 'local', runtime: 'executable' },
+					blocking: true,
+					annotations: { role: 'specialist', source: 'fabrick' }
+				},
+				{
+					id: {
+						name: 'fabrick-defillama-agent',
+						version: '0.1.0',
+						registrySourceId: { type: 'local' }
+					},
+					name: 'defillama-agent',
+					description: 'Multichain DeFi metrics via DefiLlama MCP',
+					provider: { type: 'local', runtime: 'executable' },
+					blocking: true,
+					annotations: { role: 'specialist', source: 'fabrick' }
+				},
+				{
+					id: {
+						name: 'fabrick-exa-agent',
+						version: '0.1.0',
+						registrySourceId: { type: 'local' }
+					},
+					name: 'exa-agent',
+					description: 'General web search and webpage fetching via Exa MCP',
+					provider: { type: 'local', runtime: 'executable' },
+					blocking: true,
+					annotations: { role: 'specialist', source: 'fabrick' }
 				}
 			],
-			groups: [['orchestrator']]
+			groups: [
+				['research-orchestrator', 'token-info-agent', 'defillama-agent', 'exa-agent']
+			]
 		},
 		namespaceProvider: {
 			type: 'create_if_not_exists',
