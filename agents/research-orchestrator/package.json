@@ -1,0 +1,19 @@
+{
+  "name": "fabrick-research-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "worker": "tsx src/coral-worker.ts",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^2.0.0",
+    "@mastra/core": "^1.28.0",
+    "@mastra/mcp": "^1.6.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5.5.0"
+  }
+}
