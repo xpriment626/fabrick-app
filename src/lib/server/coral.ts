@@ -21,10 +21,21 @@ export type CreatedSession = {
 	sessionId: string;
 };
 
+/**
+ * `/extended` snapshot. Matches coral-server's response shape — agents
+ * have nested status objects (running/waiting/stopped + connection +
+ * communication status), threads have a state field that may be open or
+ * closed-with-summary. The shape is intentionally lax with `unknown` in
+ * places we don't currently use, so this type can keep accepting
+ * coral-server's evolutions without breaking compilation.
+ */
 export type ExtendedSession = {
-	namespace: string;
-	sessionId: string;
-	agents: Array<{ name: string; status: string }>;
+	base?: { id: string; timestamp: string; namespace: string; status: { type: string } };
+	agents: Array<{
+		name: string;
+		status: Record<string, unknown>;
+		annotations?: Record<string, string>;
+	}>;
 	threads: Array<{
 		id: string;
 		name?: string;
@@ -37,6 +48,8 @@ export type ExtendedSession = {
 			timestamp: number;
 			mentionNames: string[];
 		}>;
+		state?: Record<string, unknown>;
+		timestamp?: string;
 	}>;
 };
 
