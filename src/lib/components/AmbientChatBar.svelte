@@ -1,16 +1,62 @@
 <!--
 	Ambient chat bar — fixed at the bottom of the viewport, persistent
 	across every route via the layout. Glass-like (light translucent over
-	a backdrop blur) so the content behind shows through diffused. Purely
-	visual for now: the input doesn't submit anywhere. Real wiring lands
-	with the session backbone (`POST /api/sessions`) in a later reroll.
+	a backdrop blur) so the content behind shows through diffused.
+
+	Submits to /api/dev/run (the dev orchestrator kickoff endpoint), then
+	navigates to /research/{namespace}/{sessionId} where the trace reel
+	lives. Stays under /api/dev/* until we wire the session-backbone
+	persistence layer (Supabase research_sessions + research_runs).
 -->
 <script lang="ts">
+	import { goto } from '$app/navigation';
+
 	let value = $state('');
+	let submitting = $state(false);
+	let errorMsg = $state<string | null>(null);
+
+	async function submit() {
+		const q = value.trim();
+		if (!q || submitting) return;
+		submitting = true;
+		errorMsg = null;
+		try {
+			const res = await fetch('/api/dev/run', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ query: q })
+			});
+			if (!res.ok) {
+				const body = await res.text().catch(() => '');
+				throw new Error(`${res.status} ${body || res.statusText}`);
+			}
+			const data = (await res.json()) as { namespace: string; sessionId: string };
+			value = '';
+			const params = new URLSearchParams({ q });
+			await goto(
+				`/research/${encodeURIComponent(data.namespace)}/${encodeURIComponent(data.sessionId)}?${params}`
+			);
+		} catch (err) {
+			errorMsg = err instanceof Error ? err.message : String(err);
+			submitting = false;
+		}
+	}
+
+	function onKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter' && !e.shiftKey) {
+			e.preventDefault();
+			void submit();
+		}
+	}
 </script>
 
 <div class="ambient-bar" aria-hidden="false">
-	<div class="ambient-pill">
+	{#if errorMsg}
+		<div class="ambient-error" role="alert">
+			{errorMsg}
+		</div>
+	{/if}
+	<div class="ambient-pill" class:submitting>
 		<svg
 			class="leading-icon"
 			width="16"
@@ -36,11 +82,19 @@
 		<input
 			bind:value
 			type="text"
-			placeholder="Ask Fabrick anything…"
+			placeholder={submitting ? 'Spinning up the fleet…' : 'Ask Fabrick anything…'}
 			aria-label="Ambient chat input"
+			disabled={submitting}
+			onkeydown={onKeydown}
 		/>
 
-		<button type="button" class="send-btn" aria-label="Send" disabled={!value.trim()}>
+		<button
+			type="button"
+			class="send-btn"
+			aria-label="Send"
+			disabled={!value.trim() || submitting}
+			onclick={submit}
+		>
 			<svg
 				width="14"
 				height="14"
@@ -85,6 +139,22 @@
 			0 1px 0 rgba(255, 255, 255, 0.55) inset,
 			0 12px 30px -12px rgba(28, 25, 23, 0.12),
 			0 2px 6px -2px rgba(28, 25, 23, 0.06);
+		transition: opacity 0.2s ease;
+	}
+
+	.ambient-pill.submitting {
+		opacity: 0.7;
+	}
+
+	.ambient-error {
+		margin-bottom: 8px;
+		padding: 8px 14px;
+		border-radius: 10px;
+		background: color-mix(in srgb, #dc2626 14%, var(--color-surface));
+		border: 1px solid color-mix(in srgb, #dc2626 30%, transparent);
+		color: #b91c1c;
+		font-size: 13px;
+		font-weight: 500;
 	}
 
 	.leading-icon {
