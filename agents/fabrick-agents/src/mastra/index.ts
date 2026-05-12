@@ -2,6 +2,9 @@ import { makeResearchOrchestrator } from './agents/research-orchestrator.js'
 import { makeTokenInfoAgent } from './agents/token-info-agent.js'
 import { makeDefillamaAgent } from './agents/defillama-agent.js'
 import { makeExaAgent } from './agents/exa-agent.js'
+import { makeTopledgerAgent } from './agents/topledger-agent.js'
+import { makeNewsAgent } from './agents/news-agent.js'
+import { makeGrokAgent } from './agents/grok-agent.js'
 
 /**
  * Lazy factories — each one builds an Agent on demand. Importing this
@@ -14,7 +17,10 @@ export const agentFactories = {
 	researchOrchestrator: makeResearchOrchestrator,
 	tokenInfoAgent: makeTokenInfoAgent,
 	defillamaAgent: makeDefillamaAgent,
-	exaAgent: makeExaAgent
+	exaAgent: makeExaAgent,
+	topledgerAgent: makeTopledgerAgent,
+	newsAgent: makeNewsAgent,
+	grokAgent: makeGrokAgent
 } as const
 
 export type AgentKey = keyof typeof agentFactories

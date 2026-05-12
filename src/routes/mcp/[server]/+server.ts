@@ -3,6 +3,7 @@
  *
  *   POST /mcp/jupiter      — Jupiter (Solana SPL prices + token metadata)
  *   POST /mcp/defillama    — DefiLlama free surface (TVL, yields, prices, etc.)
+ *   POST /mcp/coindesk     — CoinDesk Data API (curated crypto news + sentiment)
  *
  * Streamable HTTP transport, stateless. GET returns 405 — no SSE
  * notifications stream (our tools don't push anything to clients).

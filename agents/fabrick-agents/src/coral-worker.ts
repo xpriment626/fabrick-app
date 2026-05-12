@@ -4,7 +4,7 @@ const rawKey = process.argv[2]
 if (!rawKey) {
 	console.error('Usage: coral-worker.ts <agentKey>')
 	console.error(
-		'  agentKey ∈ { researchOrchestrator, tokenInfoAgent, defillamaAgent, exaAgent }'
+		'  agentKey ∈ { researchOrchestrator, tokenInfoAgent, defillamaAgent, exaAgent, topledgerAgent, newsAgent, grokAgent }'
 	)
 	process.exit(1)
 }

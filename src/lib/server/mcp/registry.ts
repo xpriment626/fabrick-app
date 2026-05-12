@@ -1,7 +1,7 @@
 /**
  * Tool definitions exposed by our MCP servers. Each server (`jupiter`,
- * `defillama`) bundles its tools with name, description, zod input
- * schema, and the handler that runs the actual API call.
+ * `defillama`, `coindesk`) bundles its tools with name, description, zod
+ * input schema, and the handler that runs the actual API call.
  */
 
 import type { McpTool } from './server';
@@ -23,6 +23,12 @@ import {
 	defillamaGetCoinPricesInput,
 	defillamaGetCoinPrices
 } from '../tools/defillama';
+import {
+	newsGetArticlesInput,
+	newsGetArticles,
+	newsGetCategoriesInput,
+	newsGetCategories
+} from '../tools/coindesk';
 
 export const JUPITER_TOOLS: McpTool[] = [
 	{
@@ -79,7 +85,25 @@ export const DEFILLAMA_TOOLS: McpTool[] = [
 	}
 ];
 
+export const COINDESK_TOOLS: McpTool[] = [
+	{
+		name: 'news_get_articles',
+		description:
+			'Recent crypto news articles from CoinDesk Data API (aggregated RSS firehose). Filter by `category` (e.g. "SOL", "BTC", "DEFI"), free-text `query`, `sinceMinutesAgo` time window, and/or pre-tagged `sentiment`.',
+		inputSchema: newsGetArticlesInput,
+		handler: (input) => newsGetArticles(input as never)
+	},
+	{
+		name: 'news_get_categories',
+		description:
+			'Lists all category tags available on CoinDesk for use with news_get_articles. Cheap discovery call — run once if you need to know what tags exist.',
+		inputSchema: newsGetCategoriesInput,
+		handler: (input) => newsGetCategories(input as never)
+	}
+];
+
 export const TOOLS_BY_SERVER: Record<string, Map<string, McpTool>> = {
 	jupiter: new Map(JUPITER_TOOLS.map((t) => [t.name, t])),
-	defillama: new Map(DEFILLAMA_TOOLS.map((t) => [t.name, t]))
+	defillama: new Map(DEFILLAMA_TOOLS.map((t) => [t.name, t])),
+	coindesk: new Map(COINDESK_TOOLS.map((t) => [t.name, t]))
 };
