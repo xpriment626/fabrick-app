@@ -1,8 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
-	import TopNav from '$lib/components/TopNav.svelte';
-	import ChatSidePanel from '$lib/components/ChatSidePanel.svelte';
 	import type { PageData } from './$types';
 	import type { ChatTurn } from '$lib/server/db/chats';
 
@@ -135,24 +133,17 @@
 	});
 </script>
 
-<TopNav active="research" />
+<main class="mx-auto flex min-h-screen max-w-[820px] flex-col px-8 py-6">
+	<header class="mb-4">
+		<h1 class="text-ink text-[20px] font-extrabold tracking-[-0.02em]">
+			{data.chat.title || 'New chat'}
+		</h1>
+	</header>
 
-<div class="mx-auto flex max-w-[1400px] gap-6 px-6 py-6">
-	<aside class="hidden w-[260px] flex-shrink-0 lg:block">
-		<ChatSidePanel recents={data.recents} currentSlug={data.chat.slug} />
-	</aside>
-
-	<main class="flex min-h-[calc(100vh-120px)] flex-1 flex-col">
-		<header class="mb-4">
-			<h1 class="text-ink text-[20px] font-extrabold tracking-[-0.02em]">
-				{data.chat.title || 'New chat'}
-			</h1>
-		</header>
-
-		<div
-			bind:this={listEl}
-			class="flex-1 space-y-5 overflow-y-auto pb-32"
-		>
+	<div
+		bind:this={listEl}
+		class="flex-1 space-y-5 overflow-y-auto pb-32"
+	>
 			{#each turns as turn (turn.id)}
 				{#if turn.role === 'user'}
 					<div class="flex justify-end">
@@ -193,42 +184,53 @@
 			{/if}
 		</div>
 
-		<form
-			onsubmit={onCompose}
-			class="bg-bg fixed right-6 bottom-6 left-6 lg:left-[calc(50%-700px+260px+48px)] lg:right-[calc(50%-700px+24px)]"
+	<form onsubmit={onCompose} class="compose">
+		<div
+			class="border-border bg-surface flex items-end gap-2 rounded-2xl border p-2 shadow-sm"
 		>
-			<div
-				class="border-border bg-surface flex items-end gap-2 rounded-2xl border p-2 shadow-sm"
+			<textarea
+				bind:value={composeValue}
+				placeholder={streaming ? 'Thinking…' : 'Ask anything…'}
+				disabled={streaming}
+				onkeydown={onKeydown}
+				rows="1"
+				class="text-ink placeholder:text-muted/60 min-h-[36px] flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-snug focus:outline-none"
+			></textarea>
+			<button
+				type="submit"
+				disabled={!composeValue.trim() || streaming}
+				class="bg-ink text-bg disabled:bg-muted/30 disabled:text-ink/50 flex h-9 w-9 items-center justify-center rounded-xl transition-opacity hover:opacity-90 disabled:cursor-default"
+				aria-label="Send"
 			>
-				<textarea
-					bind:value={composeValue}
-					placeholder={streaming ? 'Thinking…' : 'Ask anything…'}
-					disabled={streaming}
-					onkeydown={onKeydown}
-					rows="1"
-					class="text-ink placeholder:text-muted/60 min-h-[36px] flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-snug focus:outline-none"
-				></textarea>
-				<button
-					type="submit"
-					disabled={!composeValue.trim() || streaming}
-					class="bg-ink text-bg disabled:bg-muted/30 disabled:text-ink/50 flex h-9 w-9 items-center justify-center rounded-xl transition-opacity hover:opacity-90 disabled:cursor-default"
-					aria-label="Send"
+				<svg
+					width="14"
+					height="14"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2.5"
+					stroke-linecap="round"
+					stroke-linejoin="round"
 				>
-					<svg
-						width="14"
-						height="14"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2.5"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-					>
-						<path d="M5 12h14" />
-						<path d="m13 6 6 6-6 6" />
-					</svg>
-				</button>
-			</div>
-		</form>
-	</main>
-</div>
+					<path d="M5 12h14" />
+					<path d="m13 6 6 6-6 6" />
+				</svg>
+			</button>
+		</div>
+	</form>
+</main>
+
+<style>
+	/* Compose pinned to bottom of viewport, centered within the main
+	   content area (i.e. respecting the sidebar width set by Sidebar). */
+	.compose {
+		position: fixed;
+		bottom: 24px;
+		left: calc(50% + var(--sidebar-w, 60px) / 2);
+		transform: translateX(-50%);
+		width: min(720px, calc(100% - var(--sidebar-w, 60px) - 32px));
+		transition:
+			left 180ms ease,
+			width 180ms ease;
+	}
+</style>

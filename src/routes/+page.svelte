@@ -1,5 +1,4 @@
 <script lang="ts">
-	import TopNav from '$lib/components/TopNav.svelte';
 	import ResearchCard from '$lib/components/ResearchCard.svelte';
 	import ChatInput from '$lib/components/ChatInput.svelte';
 	import MarketTile from '$lib/components/MarketTile.svelte';
@@ -10,8 +9,6 @@
 	type Props = { data: PageData };
 	let { data }: Props = $props();
 </script>
-
-<TopNav active="research" />
 
 <main class="mx-auto max-w-[1280px] px-10 py-8">
 	<div class="grid grid-cols-[1fr_320px] gap-8">

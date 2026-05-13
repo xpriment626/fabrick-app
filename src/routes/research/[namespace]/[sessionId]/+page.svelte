@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import TopNav from '$lib/components/TopNav.svelte';
 	import {
 		Session,
 		type SessionAgent,
@@ -62,8 +61,6 @@
 		return m.senderName === 'research-orchestrator' && m.mentionNames.length === 0;
 	}
 </script>
-
-<TopNav active="research" />
 
 <main class="mx-auto max-w-[1100px] px-10 py-8">
 	<!-- Header: query + connection indicator -->

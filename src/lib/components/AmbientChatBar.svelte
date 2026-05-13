@@ -114,11 +114,18 @@
 	.ambient-bar {
 		position: fixed;
 		bottom: 24px;
-		left: 50%;
+		/* Center within the main content area, accounting for the
+		   sidebar width set by the Sidebar component on <html>. The
+		   left/transform pair shifts the centerline right by half the
+		   sidebar width. */
+		left: calc(50% + var(--sidebar-w, 60px) / 2);
 		transform: translateX(-50%);
-		width: min(680px, calc(100% - 32px));
+		width: min(680px, calc(100% - var(--sidebar-w, 60px) - 32px));
 		z-index: 40;
 		pointer-events: auto;
+		transition:
+			left 180ms ease,
+			width 180ms ease;
 	}
 
 	.ambient-pill {

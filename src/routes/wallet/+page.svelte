@@ -1,5 +1,4 @@
 <script lang="ts">
-	import TopNav from '$lib/components/TopNav.svelte';
 	import type { PageData } from './$types';
 
 	type Props = { data: PageData };
@@ -17,8 +16,6 @@
 	const tabs = ['Tokens', 'DeFi', 'NFTs', 'Activity'] as const;
 	let activeTab = $state<(typeof tabs)[number]>('Tokens');
 </script>
-
-<TopNav active="wallet" />
 
 <main class="mx-auto max-w-[720px] px-10 py-12">
 	<!-- Total balance block -->
