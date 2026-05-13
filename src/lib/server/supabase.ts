@@ -15,6 +15,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
+import WebSocket from 'ws';
 import { PUBLIC_SUPABASE_URL } from '$env/static/public';
 import { SUPABASE_SERVICE_ROLE_KEY } from '$env/static/private';
 import type { Database } from './database.types';
@@ -42,6 +43,11 @@ export const supabaseAdmin = createClient<Database>(
 			persistSession: false,
 			autoRefreshToken: false,
 			detectSessionInUrl: false
-		}
+		},
+		// Node 20 has no native WebSocket. supabase-js initializes its
+		// realtime client at construction (even when we never use it) and
+		// crashes without a transport. Inject `ws`. When we eventually
+		// run on Node 22+ or full Bun runtime, this can come out.
+		realtime: { transport: WebSocket as unknown as typeof globalThis.WebSocket }
 	}
 );
