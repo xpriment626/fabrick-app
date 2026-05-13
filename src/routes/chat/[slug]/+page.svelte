@@ -1,14 +1,16 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
+	import ToolCallChip from '$lib/components/ToolCallChip.svelte';
+	import { readUIMessages } from '$lib/client/ui-message-stream';
 	import type { PageData } from './$types';
-	import type { ChatTurn } from '$lib/server/db/chats';
+	import type { ChatTurn, TurnPart } from '$lib/server/db/chats';
 
 	type Props = { data: PageData };
 	let { data }: Props = $props();
 
-	// Local reactive copy of turns — we append the in-flight assistant
-	// reply here as tokens stream in.
+	// Local reactive copy of turns — server-loaded turns + any
+	// in-flight turn we're streaming.
 	let turns = $state<ChatTurn[]>([...data.chat.turns]);
 	let composeValue = $state('');
 	let streaming = $state(false);
@@ -20,17 +22,11 @@
 		listEl?.scrollTo({ top: listEl.scrollHeight, behavior: 'smooth' });
 	}
 
-	/**
-	 * Send a user message. If `alreadyPersisted` is true, the message is
-	 * not re-inserted (used for the autosend path where AmbientChatBar's
-	 * POST /api/chat already seeded the first turn).
-	 */
 	async function sendTurn(content: string, opts: { alreadyPersisted?: boolean } = {}) {
 		if (streaming) return;
 		streaming = true;
 		errorMsg = null;
 
-		// Push user turn locally (skip if it's already in our SSR snapshot).
 		if (!opts.alreadyPersisted) {
 			turns = [
 				...turns,
@@ -39,6 +35,7 @@
 					role: 'user',
 					agentName: null,
 					content,
+					parts: null,
 					status: 'complete',
 					runId: null,
 					createdAt: new Date().toISOString()
@@ -46,7 +43,8 @@
 			];
 		}
 
-		// Add a placeholder assistant turn we'll append tokens into.
+		// Placeholder assistant turn. As UIMessage snapshots arrive we
+		// replace its `parts` with the latest accumulated state.
 		const placeholderId = `streaming-${Date.now()}`;
 		turns = [
 			...turns,
@@ -55,6 +53,7 @@
 				role: 'assistant',
 				agentName: 'chat',
 				content: '',
+				parts: [],
 				status: 'streaming',
 				runId: null,
 				createdAt: new Date().toISOString()
@@ -76,31 +75,35 @@
 				throw new Error(`turn failed: ${res.status} ${body || res.statusText}`);
 			}
 
-			const reader = res.body.getReader();
-			const decoder = new TextDecoder();
-			while (true) {
-				const { value, done } = await reader.read();
-				if (done) break;
-				const chunk = decoder.decode(value, { stream: true });
+			// readUIMessages yields successive snapshots of the same
+			// UIMessage as it accumulates. Each iteration we replace the
+			// placeholder turn's `parts` + flatten text into `content`.
+			for await (const message of readUIMessages(res.body)) {
+				const parts = (message.parts ?? []) as TurnPart[];
+				const flatText = parts
+					.filter(
+						(p): p is { type: 'text'; text: string; state?: 'streaming' | 'done' } =>
+							p.type === 'text'
+					)
+					.map((p) => p.text)
+					.join('');
 				turns = turns.map((t) =>
-					t.id === placeholderId ? { ...t, content: t.content + chunk } : t
+					t.id === placeholderId
+						? { ...t, parts: [...parts], content: flatText }
+						: t
 				);
 				scrollToBottom();
 			}
-			// Mark the placeholder turn complete locally. The server has
-			// persisted the real row by now; on next navigation/reload we'll
-			// load the real id from DB.
+
 			turns = turns.map((t) =>
 				t.id === placeholderId ? { ...t, status: 'complete' } : t
 			);
 
-			// Refresh side panel + title from the DB (title gen runs
-			// fire-and-forget on the server; small delay before invalidate
-			// gives it time to land for a fresh chat).
+			// Refresh layout data (recents list + chat title which the
+			// server's fire-and-forget title-gen may have just written).
 			setTimeout(() => invalidateAll(), 1200);
 		} catch (err) {
 			errorMsg = err instanceof Error ? err.message : String(err);
-			// Drop the placeholder on failure.
 			turns = turns.filter((t) => t.id !== placeholderId);
 		} finally {
 			streaming = false;
@@ -125,12 +128,29 @@
 
 	onMount(() => {
 		scrollToBottom();
-		// Autosend: AmbientChatBar created the chat with a seeded user
-		// message and navigated here. Trigger the first model call.
 		if (data.autosend && turns.length === 1 && turns[0]?.role === 'user') {
 			sendTurn(turns[0].content, { alreadyPersisted: true });
 		}
 	});
+
+	/**
+	 * Resolve the parts array we should render for a turn. Streaming
+	 * turns have parts on them already. Loaded-from-DB turns carry
+	 * either a persisted parts array OR plain `content` text (legacy /
+	 * user turns); we synthesize a single text part for those so the
+	 * rendering path stays uniform.
+	 */
+	function partsForTurn(turn: ChatTurn): TurnPart[] {
+		if (turn.parts && turn.parts.length > 0) return turn.parts;
+		return turn.content ? [{ type: 'text', text: turn.content }] : [];
+	}
+
+	function isToolPart(p: TurnPart): boolean {
+		return typeof p.type === 'string' && p.type.startsWith('tool-');
+	}
+	function isTextPart(p: TurnPart): boolean {
+		return p.type === 'text';
+	}
 </script>
 
 <main class="mx-auto flex min-h-screen max-w-[820px] flex-col px-8 py-6">
@@ -140,49 +160,57 @@
 		</h1>
 	</header>
 
-	<div
-		bind:this={listEl}
-		class="flex-1 space-y-5 overflow-y-auto pb-32"
-	>
-			{#each turns as turn (turn.id)}
-				{#if turn.role === 'user'}
-					<div class="flex justify-end">
-						<div
-							class="bg-surface border-border max-w-[80%] rounded-2xl rounded-tr-md border px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap"
-						>
-							{turn.content}
-						</div>
+	<div bind:this={listEl} class="flex-1 space-y-5 overflow-y-auto pb-32">
+		{#each turns as turn (turn.id)}
+			{#if turn.role === 'user'}
+				<div class="flex justify-end">
+					<div
+						class="bg-surface border-border max-w-[80%] rounded-2xl rounded-tr-md border px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap"
+					>
+						{turn.content}
 					</div>
-				{:else}
-					<div class="flex flex-col gap-1">
-						<div class="text-muted text-xs uppercase tracking-wide">
-							{turn.agentName ?? 'assistant'}
-							{#if turn.status === 'streaming'}
-								<span class="ml-2 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[#d97757]"
-								></span>
-							{/if}
-						</div>
-						<div
-							class="text-ink whitespace-pre-wrap text-[15px] leading-relaxed"
-						>
-							{turn.content}
-							{#if turn.status === 'streaming' && turn.content === ''}
-								<span class="text-muted italic">thinking…</span>
-							{/if}
-						</div>
+				</div>
+			{:else}
+				{@const parts = partsForTurn(turn)}
+				<div class="flex flex-col gap-2">
+					<div class="text-muted flex items-center gap-2 text-xs uppercase tracking-wide">
+						<span>{turn.agentName ?? 'assistant'}</span>
+						{#if turn.status === 'streaming'}
+							<span
+								class="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[#d97757]"
+							></span>
+						{/if}
 					</div>
-				{/if}
-			{/each}
 
-			{#if errorMsg}
-				<div
-					class="rounded-lg border border-red-300/40 bg-red-50/60 px-3 py-2 text-sm text-red-700"
-					role="alert"
-				>
-					{errorMsg}
+					{#each parts as part, i (i)}
+						{#if isTextPart(part)}
+							<div class="text-ink whitespace-pre-wrap text-[15px] leading-relaxed">
+								{(part as { text: string }).text}
+							</div>
+						{:else if isToolPart(part)}
+							<div>
+								<ToolCallChip part={part as never} />
+							</div>
+						{/if}
+						<!-- step-start, reasoning, and other parts are ignored for now -->
+					{/each}
+
+					{#if turn.status === 'streaming' && parts.length === 0}
+						<div class="text-muted italic">thinking…</div>
+					{/if}
 				</div>
 			{/if}
-		</div>
+		{/each}
+
+		{#if errorMsg}
+			<div
+				class="rounded-lg border border-red-300/40 bg-red-50/60 px-3 py-2 text-sm text-red-700"
+				role="alert"
+			>
+				{errorMsg}
+			</div>
+		{/if}
+	</div>
 
 	<form onsubmit={onCompose} class="compose">
 		<div
@@ -221,8 +249,6 @@
 </main>
 
 <style>
-	/* Compose pinned to bottom of viewport, centered within the main
-	   content area (i.e. respecting the sidebar width set by Sidebar). */
 	.compose {
 		position: fixed;
 		bottom: 24px;
