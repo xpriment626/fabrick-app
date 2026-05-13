@@ -7,26 +7,32 @@
  *     the user message is already persisted (e.g. it was the
  *     firstUserMessage seed from POST /api/chat), to avoid duplicates.
  *
- * Returns a text stream of the assistant's reply (AI SDK
- * `toTextStreamResponse`). On stream completion, the full assistant text
- * is persisted as an `assistant`-role turn. If the chat has no title
- * yet, a fire-and-forget title-generation call runs in the background.
+ * Returns a UI message stream (AI SDK v2's `toUIMessageStreamResponse`)
+ * containing text deltas + tool calls + tool results, so the client can
+ * render inline tool-call chips in real time alongside text.
+ *
+ * On stream completion the full `parts` array (text + tool-call +
+ * tool-result, ordered) is persisted as an `assistant`-role turn so the
+ * trace replays on reload. If the chat has no title yet, a fire-and-
+ * forget title-generation call also runs.
  */
 
 import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { streamText, generateText } from 'ai';
+import { streamText, generateText, stepCountIs, convertToModelMessages, type UIMessage } from 'ai';
 import {
 	appendTurn,
 	getMessagesForModel,
 	resolveSlug,
-	setChatTitle
+	setChatTitle,
+	type TurnPart
 } from '$lib/server/db/chats';
 import {
 	chatModel,
 	titleModel,
 	CHAT_SYSTEM_PROMPT
 } from '$lib/server/chat-model';
+import { buildChatTools } from '$lib/server/chat-tools';
 
 export const POST: RequestHandler = async ({ request, params }) => {
 	const slug = params.slug;
@@ -55,33 +61,59 @@ export const POST: RequestHandler = async ({ request, params }) => {
 		});
 	}
 
-	// Build the conversation context from history. Includes the user
-	// message we just appended (or the seeded one) — we don't pre-fetch
-	// then append to avoid an extra read.
+	// Build the conversation context from history.
 	const history = await getMessagesForModel(session.id);
+
+	// Up-convert the simple {role, content} history into UIMessages so
+	// AI SDK's UIMessage stream protocol can resume cleanly. Tool parts
+	// from prior turns would also live here once we persist them in
+	// history; for now we send text-only history (cheaper context,
+	// faster turns).
+	const uiHistory: UIMessage[] = history.map((m, i) => ({
+		id: `hist-${i}`,
+		role: m.role,
+		parts: [{ type: 'text', text: m.content }]
+	}));
 
 	const result = streamText({
 		model: chatModel(),
 		system: CHAT_SYSTEM_PROMPT,
-		messages: history,
-		onFinish: async ({ text }) => {
-			// Persist the completed assistant turn. The stream has already
-			// flushed to the client by this point — DB write happens
-			// async-from-client view.
+		messages: await convertToModelMessages(uiHistory),
+		tools: buildChatTools(),
+		// Hard cap: 5 tool-using steps per turn. Prevents the agent from
+		// trying to do fleet-shaped work in a single chat turn.
+		stopWhen: stepCountIs(5),
+		toolChoice: 'auto'
+	});
+
+	return result.toUIMessageStreamResponse({
+		onFinish: async ({ responseMessage }) => {
+			// `responseMessage.parts` is the full ordered array of UI
+			// message parts the model produced (text deltas reassembled,
+			// tool calls with args, tool results). Persist verbatim so
+			// the chat UI can replay the trace on reload.
+			const parts = (responseMessage.parts ?? []) as unknown as TurnPart[];
+
+			// Flatten the text content for legacy/text-only consumers
+			// (Fleet context propagation, title gen, etc.).
+			const flatText = parts
+				.filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+				.map((p) => p.text)
+				.join('')
+				.trim();
+
 			try {
 				await appendTurn({
 					sessionId: session.id,
 					role: 'assistant',
-					content: text,
+					content: flatText,
+					parts,
 					agentName: 'chat'
 				});
 			} catch (err) {
 				console.error('[chat/turn] failed to persist assistant turn:', err);
 			}
 
-			// Fire-and-forget title generation if the chat has no title
-			// yet. Uses a cheap model and the user's first message as the
-			// only input.
 			if (!session.title) {
 				generateChatTitle(slug, content).catch((err) => {
 					console.error('[chat/turn] title generation failed:', err);
@@ -89,8 +121,6 @@ export const POST: RequestHandler = async ({ request, params }) => {
 			}
 		}
 	});
-
-	return result.toTextStreamResponse();
 };
 
 /**

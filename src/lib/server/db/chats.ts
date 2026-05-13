@@ -32,29 +32,39 @@ export type ChatSummary = {
 
 /**
  * AI SDK v2 UIMessage part shape. We persist the ordered array as JSONB
- * so the chat UI can replay the full agent trace (text + tool-call +
- * tool-result, and future reasoning parts) on reload. Loose type — the
- * AI SDK's exact discriminated union evolves, and this is the storage
- * format, not the runtime API surface.
+ * so the chat UI can replay the full agent trace on reload.
+ *
+ * AI SDK v2 emits one combined part per tool invocation, namespaced as
+ * `tool-${toolName}`, that carries both the input args and the
+ * eventual output. It transitions through states:
+ *   - input-streaming → input-available → output-available | output-error
+ *
+ * Steps are bounded by `step-start` markers. Text parts may have a
+ * `state` of `streaming` while tokens are landing.
+ *
+ * Loose type — the AI SDK's exact discriminated union evolves; this is
+ * the storage format, not the runtime API surface. We keep a permissive
+ * escape hatch for forward compat.
  */
 export type TurnPart =
-	| { type: 'text'; text: string }
+	| { type: 'text'; text: string; state?: 'streaming' | 'done' }
+	| { type: 'step-start' }
+	| { type: 'reasoning'; text: string; state?: 'streaming' | 'done' }
 	| {
-			type: 'tool-call';
+			// tool-${toolName} — one per tool invocation, state transitions
+			// through input-streaming → input-available → output-available
+			type: `tool-${string}`;
 			toolCallId: string;
-			toolName: string;
-			args?: unknown;
+			state:
+				| 'input-streaming'
+				| 'input-available'
+				| 'output-available'
+				| 'output-error';
 			input?: unknown;
-	  }
-	| {
-			type: 'tool-result';
-			toolCallId: string;
-			toolName: string;
-			result?: unknown;
 			output?: unknown;
-			isError?: boolean;
+			errorText?: string;
+			providerExecuted?: boolean;
 	  }
-	| { type: 'reasoning'; text: string }
 	| { type: string; [key: string]: unknown };
 
 export type ChatTurn = {
@@ -62,7 +72,10 @@ export type ChatTurn = {
 	role: Database['public']['Enums']['turn_role'];
 	agentName: string | null;
 	content: string;
-	parts: TurnPart[] | null;
+	/** Ordered AI SDK UIMessage parts — present on streamed assistant
+	 * turns since the chat-tools wiring landed; null for legacy and for
+	 * client-only placeholder turns the chat page synthesizes locally. */
+	parts?: TurnPart[] | null;
 	status: Database['public']['Enums']['turn_status'];
 	runId: string | null;
 	createdAt: string;
