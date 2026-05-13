@@ -161,6 +161,7 @@ export type Database = {
           created_at: string
           id: string
           parent_turn_id: string | null
+          parts: Json | null
           role: Database["public"]["Enums"]["turn_role"]
           run_id: string | null
           session_id: string
@@ -172,6 +173,7 @@ export type Database = {
           created_at?: string
           id?: string
           parent_turn_id?: string | null
+          parts?: Json | null
           role: Database["public"]["Enums"]["turn_role"]
           run_id?: string | null
           session_id: string
@@ -183,6 +185,7 @@ export type Database = {
           created_at?: string
           id?: string
           parent_turn_id?: string | null
+          parts?: Json | null
           role?: Database["public"]["Enums"]["turn_role"]
           run_id?: string | null
           session_id?: string

@@ -14,7 +14,7 @@
 
 import { customAlphabet } from 'nanoid';
 import { supabaseAdmin } from '$lib/server/supabase';
-import type { Database } from '$lib/server/database.types';
+import type { Database, Json } from '$lib/server/database.types';
 
 /** Pre-Privy stand-in. Real Privy DIDs arrive once auth wires up. */
 export const DEV_USER_ID = 'did:privy:dev-local';
@@ -30,11 +30,39 @@ export type ChatSummary = {
 	updatedAt: string;
 };
 
+/**
+ * AI SDK v2 UIMessage part shape. We persist the ordered array as JSONB
+ * so the chat UI can replay the full agent trace (text + tool-call +
+ * tool-result, and future reasoning parts) on reload. Loose type — the
+ * AI SDK's exact discriminated union evolves, and this is the storage
+ * format, not the runtime API surface.
+ */
+export type TurnPart =
+	| { type: 'text'; text: string }
+	| {
+			type: 'tool-call';
+			toolCallId: string;
+			toolName: string;
+			args?: unknown;
+			input?: unknown;
+	  }
+	| {
+			type: 'tool-result';
+			toolCallId: string;
+			toolName: string;
+			result?: unknown;
+			output?: unknown;
+			isError?: boolean;
+	  }
+	| { type: 'reasoning'; text: string }
+	| { type: string; [key: string]: unknown };
+
 export type ChatTurn = {
 	id: string;
 	role: Database['public']['Enums']['turn_role'];
 	agentName: string | null;
 	content: string;
+	parts: TurnPart[] | null;
 	status: Database['public']['Enums']['turn_status'];
 	runId: string | null;
 	createdAt: string;
@@ -108,7 +136,7 @@ export async function loadChat(slug: string): Promise<LoadedChat | null> {
 
 	const turnsRes = await supabaseAdmin
 		.from('research_turns')
-		.select('id, role, agent_name, content, status, run_id, created_at')
+		.select('id, role, agent_name, content, parts, status, run_id, created_at')
 		.eq('session_id', session.id)
 		.order('created_at', { ascending: true });
 	if (turnsRes.error) throw new Error(`loadChat: ${turnsRes.error.message}`);
@@ -118,6 +146,7 @@ export async function loadChat(slug: string): Promise<LoadedChat | null> {
 		role: t.role,
 		agentName: t.agent_name,
 		content: t.content,
+		parts: (t.parts as TurnPart[] | null) ?? null,
 		status: t.status,
 		runId: t.run_id,
 		createdAt: t.created_at
@@ -131,6 +160,7 @@ export async function appendTurn(args: {
 	sessionId: string;
 	role: Database['public']['Enums']['turn_role'];
 	content: string;
+	parts?: TurnPart[] | null;
 	agentName?: string | null;
 	status?: Database['public']['Enums']['turn_status'];
 	runId?: string | null;
@@ -141,6 +171,7 @@ export async function appendTurn(args: {
 			session_id: args.sessionId,
 			role: args.role,
 			content: args.content,
+			parts: (args.parts as Json | null | undefined) ?? null,
 			agent_name: args.agentName ?? null,
 			status: args.status ?? 'complete',
 			run_id: args.runId ?? null
