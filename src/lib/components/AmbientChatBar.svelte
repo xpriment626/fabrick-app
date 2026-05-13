@@ -3,10 +3,10 @@
 	across every route via the layout. Glass-like (light translucent over
 	a backdrop blur) so the content behind shows through diffused.
 
-	Submits to /api/dev/run (the dev orchestrator kickoff endpoint), then
-	navigates to /research/{namespace}/{sessionId} where the trace reel
-	lives. Stays under /api/dev/* until we wire the session-backbone
-	persistence layer (Supabase research_sessions + research_runs).
+	Submits to /api/chat (creates a chat with the typed text as the first
+	user turn), then navigates to /chat/{slug}?autosend=1 where the chat
+	page picks up the seeded message and triggers the model streaming.
+	One round trip, no duplicate-persist race.
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
@@ -21,21 +21,18 @@
 		submitting = true;
 		errorMsg = null;
 		try {
-			const res = await fetch('/api/dev/run', {
+			const res = await fetch('/api/chat', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ query: q })
+				body: JSON.stringify({ content: q })
 			});
 			if (!res.ok) {
 				const body = await res.text().catch(() => '');
 				throw new Error(`${res.status} ${body || res.statusText}`);
 			}
-			const data = (await res.json()) as { namespace: string; sessionId: string };
+			const data = (await res.json()) as { slug: string };
 			value = '';
-			const params = new URLSearchParams({ q });
-			await goto(
-				`/research/${encodeURIComponent(data.namespace)}/${encodeURIComponent(data.sessionId)}?${params}`
-			);
+			await goto(`/chat/${encodeURIComponent(data.slug)}?autosend=1`);
 		} catch (err) {
 			errorMsg = err instanceof Error ? err.message : String(err);
 			submitting = false;
