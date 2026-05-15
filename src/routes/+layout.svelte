@@ -17,7 +17,7 @@
 
 <Sidebar recents={data.recents} />
 
-<ConnectWalletButton />
+<ConnectWalletButton user={data.user} />
 
 <div class="main">
 	{@render children()}

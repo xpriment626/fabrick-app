@@ -27,8 +27,11 @@
 	"dependencies": {
 		"@ai-sdk/openai": "^3.0.63",
 		"@fontsource-variable/inter": "^5.0.0",
+		"@privy-io/js-sdk-core": "^0.63.0",
+		"@privy-io/server-auth": "^1.32.5",
 		"@supabase/supabase-js": "^2.105.3",
 		"ai": "^6.0.180",
+		"jose": "^6.2.3",
 		"nanoid": "^5.1.11",
 		"ws": "^8.20.1",
 		"zod": "^4.4.3"

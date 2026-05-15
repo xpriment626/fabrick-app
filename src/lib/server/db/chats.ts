@@ -16,9 +16,6 @@ import { customAlphabet } from 'nanoid';
 import { supabaseAdmin } from '$lib/server/supabase';
 import type { Database, Json } from '$lib/server/database.types';
 
-/** Pre-Privy stand-in. Real Privy DIDs arrive once auth wires up. */
-export const DEV_USER_ID = 'did:privy:dev-local';
-
 /** 8-char base58 slug. Matches the comment on `research_sessions.slug`. */
 const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 const generateSlug = customAlphabet(BASE58, 8);
@@ -84,6 +81,7 @@ export type ChatTurn = {
 export type LoadedChat = {
 	slug: string;
 	title: string | null;
+	userId: string;
 	turns: ChatTurn[];
 };
 
@@ -165,7 +163,7 @@ export async function loadChat(slug: string): Promise<LoadedChat | null> {
 		createdAt: t.created_at
 	}));
 
-	return { slug, title: session.title, turns };
+	return { slug, title: session.title, userId: session.userId, turns };
 }
 
 /** Append a turn. Returns the new turn id. */

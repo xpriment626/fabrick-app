@@ -13,12 +13,7 @@
 import { getTokenPrices } from '$lib/server/jupiter';
 import { getTopSolanaProtocols } from '$lib/server/defillama';
 import { loadWalletSnapshot } from '$lib/server/wallet';
-import {
-	MARKET_TICKERS,
-	MARKET_TICKER_MINTS,
-	TOKENS,
-	SAMPLE_WALLET_ADDRESS
-} from '$lib/server/tokens';
+import { MARKET_TICKERS, MARKET_TICKER_MINTS, TOKENS } from '$lib/server/tokens';
 import { formatUsdPrice } from '$lib/format';
 import {
 	featuredStory,
@@ -31,11 +26,11 @@ import {
 	type WalletSnapshot
 } from '$lib/placeholder-data';
 
-export const load = async () => {
+export const load = async ({ locals }) => {
 	const [marketTickers, trendingProtocols, walletSnapshot] = await Promise.all([
 		loadMarketTickers(),
 		loadTrending(),
-		loadWalletPreview()
+		loadWalletPreview(locals.user?.solanaAddress ?? null)
 	]);
 
 	return {
@@ -88,9 +83,13 @@ async function loadTrending(): Promise<TrendingProtocol[]> {
 	}
 }
 
-async function loadWalletPreview(): Promise<WalletSnapshot> {
+async function loadWalletPreview(address: string | null): Promise<WalletSnapshot> {
+	// Anonymous home page (or user whose wallet hasn't been provisioned
+	// yet) shows the marketing-shaped placeholder. Authed users with a
+	// Privy embedded wallet see their actual holdings.
+	if (!address) return fallbackWallet;
 	try {
-		return await loadWalletSnapshot(SAMPLE_WALLET_ADDRESS);
+		return await loadWalletSnapshot(address);
 	} catch (err) {
 		console.warn('[home] wallet preview fell back to placeholder:', err);
 		return fallbackWallet;

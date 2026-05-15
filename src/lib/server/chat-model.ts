@@ -6,22 +6,44 @@
  * to whatever proxy Coral injects via env. This one is the in-process
  * default chat agent — direct to OpenRouter, no Coral proxy in between.
  *
- * Per-user BYOK (decrypting the user's OpenRouter key from Supabase) is
- * future work (design.md §3.5.b). For now we use the env's
- * OPENROUTER_API_KEY for every request.
+ * BYOK semantics: prefer the user's encrypted OpenRouter key (decrypted
+ * via `get_openrouter_key(user_id)`); fall back to `OPENROUTER_API_KEY`
+ * env for dev convenience when the user hasn't set their own. Production
+ * deployments should set OPENROUTER_API_KEY blank and require BYOK.
  */
 
 import { createOpenAI } from '@ai-sdk/openai';
 import { OPENROUTER_API_KEY } from '$env/static/private';
+import { supabaseAdmin } from '$lib/server/supabase';
 
-if (!OPENROUTER_API_KEY) {
-	throw new Error('OPENROUTER_API_KEY is not set');
+/**
+ * Fetch a user's decrypted OpenRouter key via the security-definer
+ * Postgres function. Returns null if the user hasn't set one — caller
+ * should fall back to the env default.
+ */
+export async function fetchUserOpenrouterKey(userId: string): Promise<string | null> {
+	const { data, error: rpcErr } = await supabaseAdmin.rpc('get_openrouter_key', {
+		p_user_id: userId
+	});
+	if (rpcErr) {
+		console.error('[chat-model] get_openrouter_key failed:', rpcErr.message);
+		return null;
+	}
+	return data ?? null;
 }
 
-const openrouter = createOpenAI({
-	baseURL: 'https://openrouter.ai/api/v1',
-	apiKey: OPENROUTER_API_KEY
-});
+/**
+ * Resolve the API key to use for the current request: user's BYOK key
+ * if set, otherwise the env fallback. Throws if neither exists.
+ */
+export async function resolveOpenrouterKey(userId: string): Promise<string> {
+	const userKey = await fetchUserOpenrouterKey(userId);
+	if (userKey) return userKey;
+	if (OPENROUTER_API_KEY) return OPENROUTER_API_KEY;
+	throw new Error(
+		'No OpenRouter API key available — set one in /settings or define OPENROUTER_API_KEY env'
+	);
+}
 
 /**
  * Default chat model — Haiku 4.5. Surprisingly sharp conversationally
@@ -33,15 +55,20 @@ export const CHAT_MODEL_ID = 'anthropic/claude-haiku-4.5';
 /** Fast/cheap model for utility calls like title generation. */
 export const TITLE_MODEL_ID = 'openai/gpt-5.4-mini';
 
-export function chatModel() {
-	// .chat() forces the OpenAI Chat Completions API shape. OpenRouter
-	// rejects the newer /responses path that AI SDK v2 defaults to —
-	// same reason model.ts in fabrick-agents uses .chat() too.
-	return openrouter.chat(CHAT_MODEL_ID);
+/**
+ * Construct a per-request OpenRouter provider. Don't cache — each
+ * request can carry a different user's BYOK key.
+ *
+ * .chat() forces the OpenAI Chat Completions API shape. OpenRouter
+ * rejects the newer /responses path that AI SDK v2 defaults to —
+ * same reason model.ts in fabrick-agents uses .chat() too.
+ */
+export function chatModel(apiKey: string) {
+	return createOpenAI({ baseURL: 'https://openrouter.ai/api/v1', apiKey }).chat(CHAT_MODEL_ID);
 }
 
-export function titleModel() {
-	return openrouter.chat(TITLE_MODEL_ID);
+export function titleModel(apiKey: string) {
+	return createOpenAI({ baseURL: 'https://openrouter.ai/api/v1', apiKey }).chat(TITLE_MODEL_ID);
 }
 
 export const CHAT_SYSTEM_PROMPT = `You are the Fabrick assistant — a quiet, capable research companion for Solana ecosystem questions, DeFi positions, token research, and adjacent crypto context.

@@ -6,16 +6,28 @@
 	Submits to /api/chat (creates a chat with the typed text as the first
 	user turn), then navigates to /chat/{slug}?autosend=1 where the chat
 	page picks up the seeded message and triggers the model streaming.
-	One round trip, no duplicate-persist race.
+
+	Anonymous users see a "Sign in to chat" CTA instead — clicking
+	opens the login modal. After auth the page reloads, the bar
+	switches to live mode.
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
+	import LoginModal from './LoginModal.svelte';
 
 	let value = $state('');
 	let submitting = $state(false);
 	let errorMsg = $state<string | null>(null);
+	let loginOpen = $state(false);
+
+	const authed = $derived(Boolean(page.data.user));
 
 	async function submit() {
+		if (!authed) {
+			loginOpen = true;
+			return;
+		}
 		const q = value.trim();
 		if (!q || submitting) return;
 		submitting = true;
@@ -46,6 +58,8 @@
 		}
 	}
 </script>
+
+<LoginModal bind:open={loginOpen} onClose={() => (loginOpen = false)} />
 
 <div class="ambient-bar" aria-hidden="false">
 	{#if errorMsg}
@@ -79,17 +93,24 @@
 		<input
 			bind:value
 			type="text"
-			placeholder={submitting ? 'Spinning up the fleet…' : 'Ask Fabrick anything…'}
+			placeholder={!authed
+				? 'Sign in to ask Fabrick anything…'
+				: submitting
+					? 'Spinning up the fleet…'
+					: 'Ask Fabrick anything…'}
 			aria-label="Ambient chat input"
-			disabled={submitting}
+			disabled={submitting || !authed}
 			onkeydown={onKeydown}
+			onclick={() => {
+				if (!authed) loginOpen = true;
+			}}
 		/>
 
 		<button
 			type="button"
 			class="send-btn"
-			aria-label="Send"
-			disabled={!value.trim() || submitting}
+			aria-label={authed ? 'Send' : 'Sign in'}
+			disabled={authed && (!value.trim() || submitting)}
 			onclick={submit}
 		>
 			<svg

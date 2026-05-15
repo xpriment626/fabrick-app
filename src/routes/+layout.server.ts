@@ -1,19 +1,29 @@
 import type { LayoutServerLoad } from './$types';
-import { listChats, DEV_USER_ID } from '$lib/server/db/chats';
+import { listChats } from '$lib/server/db/chats';
 
 /**
- * Root layout load. Fetches the recent-chats list once so the sidebar
- * is populated on every page without each route having to re-fetch.
+ * Root layout load. Threads the authenticated user (from
+ * hooks.server.ts) into every page and prefetches the recent-chats
+ * list for the sidebar.
  *
- * Failures degrade gracefully — sidebar renders with empty history if
- * Supabase is unreachable, rather than failing the whole page.
+ * Anonymous browsing is supported — the home page renders, but the
+ * sidebar history is empty and the chat composer routes the user
+ * through the sign-in modal before persisting anything.
+ *
+ * Failures on `listChats` degrade gracefully — sidebar shows empty
+ * history rather than failing the whole page.
  */
-export const load: LayoutServerLoad = async () => {
+export const load: LayoutServerLoad = async ({ locals }) => {
 	let recents: Awaited<ReturnType<typeof listChats>> = [];
-	try {
-		recents = await listChats(DEV_USER_ID, 50);
-	} catch (err) {
-		console.error('[layout] listChats failed:', err);
+	if (locals.user) {
+		try {
+			recents = await listChats(locals.user.id, 50);
+		} catch (err) {
+			console.error('[layout] listChats failed:', err);
+		}
 	}
-	return { recents };
+	return {
+		user: locals.user,
+		recents
+	};
 };

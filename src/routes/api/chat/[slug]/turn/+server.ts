@@ -30,11 +30,14 @@ import {
 import {
 	chatModel,
 	titleModel,
-	CHAT_SYSTEM_PROMPT
+	CHAT_SYSTEM_PROMPT,
+	resolveOpenrouterKey
 } from '$lib/server/chat-model';
 import { buildChatTools } from '$lib/server/chat-tools';
 
-export const POST: RequestHandler = async ({ request, params }) => {
+export const POST: RequestHandler = async ({ request, params, locals }) => {
+	if (!locals.user) throw error(401, 'sign in required');
+
 	const slug = params.slug;
 	if (!slug) throw error(400, 'slug required');
 
@@ -52,6 +55,11 @@ export const POST: RequestHandler = async ({ request, params }) => {
 
 	const session = await resolveSlug(slug);
 	if (!session) throw error(404, `chat not found: ${slug}`);
+	if (session.userId !== locals.user.id) throw error(403, 'not your chat');
+
+	// Resolve the API key per-request — user's BYOK key if set,
+	// otherwise env fallback. Throws if neither is configured.
+	const apiKey = await resolveOpenrouterKey(locals.user.id);
 
 	if (persistUser) {
 		await appendTurn({
@@ -76,7 +84,7 @@ export const POST: RequestHandler = async ({ request, params }) => {
 	}));
 
 	const result = streamText({
-		model: chatModel(),
+		model: chatModel(apiKey),
 		system: CHAT_SYSTEM_PROMPT,
 		messages: await convertToModelMessages(uiHistory),
 		tools: buildChatTools(),
@@ -115,7 +123,7 @@ export const POST: RequestHandler = async ({ request, params }) => {
 			}
 
 			if (!session.title) {
-				generateChatTitle(slug, content).catch((err) => {
+				generateChatTitle(slug, content, apiKey).catch((err) => {
 					console.error('[chat/turn] title generation failed:', err);
 				});
 			}
@@ -127,9 +135,13 @@ export const POST: RequestHandler = async ({ request, params }) => {
  * Produce a 3-6 word chat title from the user's first message. Runs
  * detached from the request lifecycle; failure is non-fatal.
  */
-async function generateChatTitle(slug: string, firstUserMessage: string): Promise<void> {
+async function generateChatTitle(
+	slug: string,
+	firstUserMessage: string,
+	apiKey: string
+): Promise<void> {
 	const { text } = await generateText({
-		model: titleModel(),
+		model: titleModel(apiKey),
 		system: `Generate a short title (3-6 words, sentence case, no quotes, no trailing punctuation) that summarizes the TOPIC of the user's first chat message. DO NOT answer the message. DO NOT explain. Return ONLY the title text itself.
 
 Examples:

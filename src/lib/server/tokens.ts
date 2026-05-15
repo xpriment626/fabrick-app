@@ -72,11 +72,7 @@ export const MINT_TO_SYMBOL: Record<string, string> = Object.fromEntries(
 );
 
 /**
- * Sample Solana address used for the wallet route until Privy lands in
- * Phase 3 and per-user wallets replace it. Picked from a recent finalized
- * block as a fee payer with visible DeFi activity (~83 SOL, 50+ SPL token
- * accounts). Specific identity is irrelevant — anything on-chain is public.
- * Swap freely if a richer demo account is needed; the adapters render any
- * address that the Helius+Jupiter stack can resolve.
+ * (Privy now provisions per-user embedded Solana wallets on first
+ * sign-in; the home and wallet routes read `locals.user.solanaAddress`
+ * for the real address. No global sample needed.)
  */
-export const SAMPLE_WALLET_ADDRESS = 'DRpbCBMxVnDK7maPM5tGv6MvB3v1sRMC86PZ8okm21hy';

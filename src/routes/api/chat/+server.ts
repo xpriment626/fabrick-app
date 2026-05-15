@@ -1,5 +1,5 @@
 /**
- * POST /api/chat — create a new chat.
+ * POST /api/chat — create a new chat (authenticated users only).
  *
  * Body: { content?: string }
  *   - If `content` is provided, persists it as the first user turn so the
@@ -7,13 +7,17 @@
  *     without an extra round trip to insert the first message.
  *
  * Response: { slug, firstTurnId | null }
+ * 401: anonymous request (no session cookie) — client should open the
+ *      login modal before retrying.
  */
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { createChat, DEV_USER_ID } from '$lib/server/db/chats';
+import { createChat } from '$lib/server/db/chats';
 
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, locals }) => {
+	if (!locals.user) throw error(401, 'sign in required');
+
 	let body: { content?: unknown } = {};
 	try {
 		body = await request.json();
@@ -28,7 +32,7 @@ export const POST: RequestHandler = async ({ request }) => {
 
 	try {
 		const { slug, firstTurnId } = await createChat({
-			userId: DEV_USER_ID,
+			userId: locals.user.id,
 			firstUserMessage: content
 		});
 		return json({ slug, firstTurnId });
