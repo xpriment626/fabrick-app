@@ -27,3 +27,7 @@ vite.config.ts.timestamp-*
 .idea
 *.swp
 *.swo
+
+# Playwright (MCP session snapshots + screenshot output)
+.playwright-mcp
+.playwright-artifacts

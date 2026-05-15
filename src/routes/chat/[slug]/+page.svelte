@@ -2,6 +2,7 @@
 	import { onMount, tick } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
 	import ToolCallChip from '$lib/components/ToolCallChip.svelte';
+	import { getArtifactRenderer } from '$lib/components/artifacts/registry';
 	import { readUIMessages } from '$lib/client/ui-message-stream';
 	import type { PageData } from './$types';
 	import type { ChatTurn, TurnPart } from '$lib/server/db/chats';
@@ -151,6 +152,19 @@
 	function isTextPart(p: TurnPart): boolean {
 		return p.type === 'text';
 	}
+
+	type ToolPart = Extract<TurnPart, { type: `tool-${string}` }>;
+
+	/** Renderer + output payload for a completed tool part, or null. */
+	function artifactFor(p: TurnPart) {
+		if (!isToolPart(p)) return null;
+		const tp = p as ToolPart;
+		if (tp.state !== 'output-available') return null;
+		const toolName = tp.type.replace(/^tool-/, '');
+		const renderer = getArtifactRenderer(toolName);
+		if (!renderer) return null;
+		return { renderer, output: tp.output };
+	}
 </script>
 
 <main class="mx-auto flex min-h-screen max-w-[820px] flex-col px-8 py-6">
@@ -188,8 +202,13 @@
 								{(part as { text: string }).text}
 							</div>
 						{:else if isToolPart(part)}
-							<div>
+							{@const artifact = artifactFor(part)}
+							<div class="flex flex-col gap-2">
 								<ToolCallChip part={part as never} />
+								{#if artifact}
+									{@const Renderer = artifact.renderer}
+									<Renderer output={artifact.output} />
+								{/if}
 							</div>
 						{/if}
 						<!-- step-start, reasoning, and other parts are ignored for now -->
