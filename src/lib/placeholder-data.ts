@@ -20,6 +20,15 @@ export type ResearchStory = {
 	sourceCount: number;
 	sources: string[];
 	timestamp: string;
+	/** External article URL (set for live news; `null`/undefined for synthesized stories or placeholder). */
+	href?: string | null;
+	/**
+	 * Optional hero image. Set only when the upstream feed exposes a
+	 * real article-specific image — generic source-logo placeholders are
+	 * filtered out upstream so we don't render the same fallback graphic
+	 * on every other card.
+	 */
+	imageUrl?: string | null;
 };
 
 export const featuredStory: ResearchStory = {

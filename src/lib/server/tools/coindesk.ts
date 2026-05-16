@@ -73,7 +73,8 @@ export const newsGetArticlesOutput = z.object({
 			publishedAtIso: z.string(),
 			sentiment: z.enum(['POSITIVE', 'NEGATIVE', 'NEUTRAL']).nullable(),
 			categories: z.array(z.string()),
-			snippet: z.string()
+			snippet: z.string(),
+			imageUrl: z.string().nullable()
 		})
 	),
 	count: z.number().int(),
@@ -87,9 +88,31 @@ type RawArticle = {
 	BODY?: string;
 	KEYWORDS?: string;
 	SENTIMENT?: string;
+	IMAGE_URL?: string;
 	CATEGORY_DATA?: { CATEGORY?: string; NAME?: string }[];
 	SOURCE_DATA?: { NAME?: string };
 };
+
+/**
+ * CoinDesk's IMAGE_URL field is populated on every article, but ~half
+ * the time it's a generic per-source placeholder (e.g. the source's
+ * logo on a colored background) rather than a real article-specific
+ * image. Two patterns we've observed in the wild:
+ *
+ *   https://resources.cryptocompare.com/news/<source_id>/default.png
+ *   https://images.cryptocompare.com/news/default/<source_slug>.png
+ *
+ * Both contain the literal segment `/default`. That's the cheap,
+ * stable signal — checking for it in the path catches both patterns
+ * without false positives we've seen in real article filenames
+ * (which are numeric IDs like `61963857.jpeg`).
+ */
+function articleImageOrNull(raw: string | undefined): string | null {
+	if (!raw || typeof raw !== 'string') return null;
+	if (!raw.startsWith('http')) return null;
+	if (/\/default(?:\.png|\/)/i.test(raw)) return null;
+	return raw;
+}
 
 function normalizeSentiment(s: string | undefined): 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL' | null {
 	if (!s) return null;
@@ -154,7 +177,8 @@ export async function newsGetArticles(input: NewsGetArticlesInput) {
 				categories: (a.CATEGORY_DATA ?? [])
 					.map((c) => c.CATEGORY ?? c.NAME ?? '')
 					.filter(Boolean),
-				snippet: body.length > 400 ? body.slice(0, 400) + '…' : body
+				snippet: body.length > 400 ? body.slice(0, 400) + '…' : body,
+				imageUrl: articleImageOrNull(a.IMAGE_URL)
 			};
 		});
 

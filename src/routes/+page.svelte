@@ -1,7 +1,6 @@
 <script lang="ts">
 	import ResearchCard from '$lib/components/ResearchCard.svelte';
 	import ChatInput from '$lib/components/ChatInput.svelte';
-	import MarketTile from '$lib/components/MarketTile.svelte';
 	import WalletPreview from '$lib/components/WalletPreview.svelte';
 	import TrendingPanel from '$lib/components/TrendingPanel.svelte';
 	import type { PageData } from './$types';
@@ -12,7 +11,7 @@
 
 <main class="mx-auto max-w-[1280px] px-10 py-8">
 	<div class="grid grid-cols-[1fr_320px] gap-8">
-		<!-- Main column -->
+		<!-- Main column — editorial layout: 1 featured + 3 secondary + 3 extra. -->
 		<div class="flex flex-col gap-6">
 			<!-- Page header: title + subtitle on left, ChatInput baseline-aligned on right -->
 			<header class="flex items-end justify-between">
@@ -33,11 +32,13 @@
 				{/each}
 			</div>
 
-			<div class="flex gap-3">
-				{#each data.marketTickers as ticker (ticker.ticker)}
-					<MarketTile data={ticker} />
-				{/each}
-			</div>
+			{#if data.extraStories.length > 0}
+				<div class="grid grid-cols-3 gap-4">
+					{#each data.extraStories as story (story.id)}
+						<ResearchCard {story} />
+					{/each}
+				</div>
+			{/if}
 		</div>
 
 		<!--
