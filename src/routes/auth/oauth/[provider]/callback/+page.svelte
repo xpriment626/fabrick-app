@@ -6,10 +6,16 @@
 	implicitly. We orchestrate it ourselves:
 
 	  1. LoginModal "Continue with X" → privy.auth.oauth.generateURL(...)
-	     → window.location.href = url   (full-page redirect to provider)
-	  2. Provider redirects back to /auth/oauth/[provider]/callback?code=...&state=...
-	  3. This page reads code + state from the URL
-	  4. privy.auth.oauth.loginWithCode(code, state, provider) → Privy access token
+	     → window.location.href = url   (full-page redirect to provider via
+	     Privy's hosted OAuth intermediary)
+	  2. Privy hands off to the provider, the provider sends the user back
+	     to Privy, Privy redirects to this page with:
+	       /auth/oauth/[provider]/callback?privy_oauth_state=…&privy_oauth_code=…
+	     (NOT the bare OAuth `code` + `state` — Privy's own intermediary
+	     handles the provider-side exchange, then forwards Privy-namespaced
+	     params to us.)
+	  3. This page reads privy_oauth_code + privy_oauth_state from the URL
+	  4. privy.auth.oauth.loginWithCode(code, state, provider) → Privy session
 	  5. exchangeForFabrickSession(privy) → fabrick-session cookie
 	  6. goto('/') to return the user home
 
@@ -40,10 +46,15 @@
 				);
 			}
 
-			const code = page.url.searchParams.get('code');
-			const state = page.url.searchParams.get('state');
+			// Privy's hosted intermediary forwards Privy-namespaced params
+			// after exchanging with the upstream provider — NOT the raw
+			// OAuth code/state. Read those.
+			const code = page.url.searchParams.get('privy_oauth_code');
+			const state = page.url.searchParams.get('privy_oauth_state');
 			if (!code || !state) {
-				throw new Error('Missing `code` or `state` in callback URL');
+				throw new Error(
+					'Auth session oauth returned invalid credentials (missing privy_oauth_code or privy_oauth_state)'
+				);
 			}
 
 			const privy = await getPrivy();
