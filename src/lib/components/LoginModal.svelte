@@ -23,6 +23,7 @@
 		| 'awaiting-code'
 		| 'submitting-code'
 		| 'passkey-pending'
+		| 'oauth-redirecting'
 		| 'done'
 		| 'error';
 
@@ -64,6 +65,27 @@
 			await invalidateAll();
 			onClose();
 			reset();
+		} catch (err) {
+			errorMsg = err instanceof Error ? err.message : String(err);
+			stage = 'error';
+		}
+	}
+
+	/**
+	 * Kick off a Privy OAuth flow. `js-sdk-core` gives us the provider
+	 * URL; we redirect the whole page to it. The provider sends the user
+	 * back to /auth/oauth/[provider]/callback?code=...&state=... where
+	 * the callback page finishes the handshake.
+	 */
+	async function tryOAuth(provider: 'twitter') {
+		stage = 'oauth-redirecting';
+		errorMsg = null;
+		try {
+			const privy = await getPrivy();
+			const redirectURI = `${window.location.origin}/auth/oauth/${provider}/callback`;
+			const { url } = await privy.auth.oauth.generateURL(provider, redirectURI);
+			if (!url) throw new Error('Privy did not return an OAuth URL');
+			window.location.href = url;
 		} catch (err) {
 			errorMsg = err instanceof Error ? err.message : String(err);
 			stage = 'error';
@@ -162,6 +184,26 @@
 				>
 					Continue with passkey
 				</button>
+
+				<button
+					type="button"
+					class="secondary oauth-x"
+					onclick={() => tryOAuth('twitter')}
+					disabled={stage === 'sending-code'}
+				>
+					<svg
+						width="14"
+						height="14"
+						viewBox="0 0 24 24"
+						fill="currentColor"
+						aria-hidden="true"
+					>
+						<path
+							d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"
+						/>
+					</svg>
+					<span>Continue with X</span>
+				</button>
 			{:else if stage === 'awaiting-code' || stage === 'submitting-code'}
 				<form
 					onsubmit={(e) => {
@@ -203,6 +245,8 @@
 				</form>
 			{:else if stage === 'passkey-pending'}
 				<p class="status">Waiting for passkey…</p>
+			{:else if stage === 'oauth-redirecting'}
+				<p class="status">Redirecting to X…</p>
 			{:else if stage === 'done'}
 				<p class="status">Signed in.</p>
 			{/if}
@@ -334,6 +378,18 @@
 	}
 	.secondary:hover:not(:disabled) {
 		background: color-mix(in srgb, var(--color-ink) 4%, var(--color-surface));
+	}
+
+	.oauth-x {
+		margin-top: 8px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+	}
+	.oauth-x:disabled {
+		opacity: 0.5;
+		cursor: default;
 	}
 
 	.sent-to {

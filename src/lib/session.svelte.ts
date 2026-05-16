@@ -95,19 +95,29 @@ export type SessionInitOptions = {
 	initialThreads: SessionThread[];
 };
 
+export type SessionMode = 'live' | 'archived';
+
 export class Session {
 	readonly namespace: string;
 	readonly sessionId: string;
+	readonly query: string;
+	readonly mode: SessionMode;
+	readonly startedAt: number;
 
 	public connected = $state(false);
 	public agents: SvelteMap<string, SessionAgent> = new SvelteMap();
 	public threads: SvelteMap<string, SessionThread> = new SvelteMap();
+	public archived = $state(false);
 
 	private socket: WebSocket | null = null;
+	private archiving = false;
 
-	constructor(opts: SessionInitOptions) {
+	constructor(opts: SessionInitOptions & { query?: string; mode?: SessionMode }) {
 		this.namespace = opts.namespace;
 		this.sessionId = opts.sessionId;
+		this.query = opts.query ?? '';
+		this.mode = opts.mode ?? 'live';
+		this.startedAt = Date.now();
 
 		// Seed initial state from the SSR snapshot.
 		for (const agent of opts.initialAgents) {
@@ -120,12 +130,28 @@ export class Session {
 			});
 		}
 
+		// Archived sessions are read-only — no WS subscription, no
+		// reconcile, no archive trigger. The snapshot from the load
+		// function is the full and final state.
+		if (this.mode === 'archived') {
+			this.connected = false;
+			this.archived = true;
+			return;
+		}
+
 		// Only open the WebSocket in the browser. Skip during SSR.
 		if (typeof window === 'undefined') return;
 
 		this.socket = new WebSocket(opts.eventsWsUrl);
 		this.socket.onopen = () => {
 			this.connected = true;
+			// Reconcile against the latest /extended snapshot — between
+			// the SSR-time snapshot fetch and this WS subscription, the
+			// orchestrator may have dispatched and created the research
+			// thread. Without this refresh, the client never learns about
+			// the thread and silently drops every `thread_message_sent`
+			// event that arrives for it.
+			void this.reconcileFromSnapshot();
 		};
 		this.socket.onerror = (ev) => {
 			console.error('[session] WS error', ev);
@@ -149,6 +175,99 @@ export class Session {
 	close() {
 		this.socket?.close();
 		this.socket = null;
+	}
+
+	/**
+	 * Push the current full state to the Turso archive. Fired once,
+	 * the moment the orchestrator's final synthesis lands. The server
+	 * endpoint is idempotent on (user_id, session_id) — retries are
+	 * safe — but we still gate on `archived`/`archiving` to avoid
+	 * redundant HTTP calls.
+	 */
+	private async archiveRun(): Promise<void> {
+		if (this.mode === 'archived' || this.archived || this.archiving) return;
+		this.archiving = true;
+		try {
+			const synthesis = this.finalSynthesis;
+			const body = {
+				namespace: this.namespace,
+				sessionId: this.sessionId,
+				query: this.query,
+				synthesisText: synthesis?.text ?? null,
+				trace: {
+					agents: Array.from(this.agents.values()),
+					threads: Array.from(this.threads.values()).map((t) => ({
+						id: t.id,
+						name: t.name,
+						participants: t.participants,
+						messages: t.messages,
+						state: t.state,
+						timestamp: t.timestamp
+					}))
+				},
+				startedAt: this.startedAt
+			};
+			const res = await fetch('/api/fleet/archive', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify(body)
+			});
+			if (!res.ok) {
+				const txt = await res.text().catch(() => '');
+				console.warn('[session] archive failed:', res.status, txt);
+				return;
+			}
+			this.archived = true;
+		} catch (err) {
+			console.warn('[session] archive error:', err);
+		} finally {
+			this.archiving = false;
+		}
+	}
+
+	/**
+	 * Pull the latest `/extended` snapshot and merge it into local state.
+	 * Used right after WS open to close the gap between the SSR snapshot
+	 * and the live subscription. Idempotent — only fills in agents we
+	 * don't have yet and threads we haven't seen.
+	 */
+	private async reconcileFromSnapshot(): Promise<void> {
+		try {
+			const url = `/api/coral/snapshot?namespace=${encodeURIComponent(this.namespace)}&sessionId=${encodeURIComponent(this.sessionId)}`;
+			const res = await fetch(url);
+			if (!res.ok) return;
+			const snap = (await res.json()) as {
+				agents?: SessionAgent[];
+				threads?: SessionThread[];
+			};
+			for (const agent of snap.agents ?? []) {
+				const existing = this.agents.get(agent.name);
+				// Overwrite — server's view of agent status is canonical
+				// at the moment of the snapshot. Live WS events resume from here.
+				this.agents.set(agent.name, { ...agent });
+				if (!existing) continue;
+			}
+			for (const thread of snap.threads ?? []) {
+				const existing = this.threads.get(thread.id);
+				if (existing) {
+					// Merge: keep client's unread counter, replace
+					// authoritative fields (messages, participants, state).
+					this.threads.set(thread.id, {
+						...thread,
+						messages: thread.messages ?? [],
+						unread: existing.unread
+					});
+				} else {
+					this.threads.set(thread.id, {
+						...thread,
+						messages: thread.messages ?? [],
+						unread: 0
+					});
+				}
+			}
+		} catch (err) {
+			console.warn('[session] reconcile failed:', err);
+		}
 	}
 
 	private applyEvent(data: SessionEvent) {
@@ -241,6 +360,18 @@ export class Session {
 				t.messages = [...t.messages, data.message];
 				t.unread += 1;
 				this.threads.set(t.id, t);
+				// Orchestrator + no mentions = the final synthesis. Fire
+				// the archive call once. The endpoint is idempotent on
+				// session_id, so we don't strictly need to gate on
+				// `archived`, but skipping the redundant request is free.
+				if (
+					data.message.senderName === 'research-orchestrator' &&
+					data.message.mentionNames.length === 0 &&
+					!this.archived &&
+					!this.archiving
+				) {
+					void this.archiveRun();
+				}
 				break;
 			}
 			case 'thread_closed': {

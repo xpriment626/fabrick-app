@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import { invalidateAll } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
 	import ToolCallChip from '$lib/components/ToolCallChip.svelte';
-	import { getArtifactRenderer } from '$lib/components/artifacts/registry';
+	import { getArtifactRenderer, shouldSuppressChip } from '$lib/components/artifacts/registry';
 	import { readUIMessages } from '$lib/client/ui-message-stream';
 	import type { PageData } from './$types';
 	import type { ChatTurn, TurnPart } from '$lib/server/db/chats';
@@ -17,6 +17,31 @@
 	let streaming = $state(false);
 	let errorMsg = $state<string | null>(null);
 	let listEl: HTMLDivElement;
+	let fleetMode = $state(false);
+	let dispatchingFleet = $state(false);
+
+	async function dispatchFleet(content: string) {
+		if (dispatchingFleet) return;
+		dispatchingFleet = true;
+		errorMsg = null;
+		try {
+			const res = await fetch('/api/fleet/run', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ query: content, slug: data.chat.slug })
+			});
+			if (!res.ok) {
+				const body = await res.text().catch(() => '');
+				throw new Error(`fleet kickoff failed: ${res.status} ${body || res.statusText}`);
+			}
+			const out = (await res.json()) as { redirectTo?: string };
+			if (!out.redirectTo) throw new Error('Server returned no redirectTo');
+			await goto(out.redirectTo);
+		} catch (err) {
+			errorMsg = err instanceof Error ? err.message : String(err);
+			dispatchingFleet = false;
+		}
+	}
 
 	async function scrollToBottom() {
 		await tick();
@@ -114,9 +139,13 @@
 	function onCompose(e: SubmitEvent) {
 		e.preventDefault();
 		const text = composeValue.trim();
-		if (!text || streaming) return;
+		if (!text || streaming || dispatchingFleet) return;
 		composeValue = '';
-		sendTurn(text);
+		if (fleetMode) {
+			dispatchFleet(text);
+		} else {
+			sendTurn(text);
+		}
 	}
 
 	function onKeydown(e: KeyboardEvent) {
@@ -203,8 +232,12 @@
 							</div>
 						{:else if isToolPart(part)}
 							{@const artifact = artifactFor(part)}
+							{@const toolName = (part as ToolPart).type.replace(/^tool-/, '')}
+							{@const suppressChip = shouldSuppressChip(toolName)}
 							<div class="flex flex-col gap-2">
-								<ToolCallChip part={part as never} />
+								{#if !suppressChip}
+									<ToolCallChip part={part as never} />
+								{/if}
 								{#if artifact}
 									{@const Renderer = artifact.renderer}
 									<Renderer output={artifact.output} />
@@ -234,18 +267,50 @@
 	<form onsubmit={onCompose} class="compose">
 		<div
 			class="border-border bg-surface flex items-end gap-2 rounded-2xl border p-2 shadow-sm"
+			class:fleet-on={fleetMode}
 		>
+			<button
+				type="button"
+				class="fleet-toggle"
+				class:on={fleetMode}
+				onclick={() => (fleetMode = !fleetMode)}
+				aria-pressed={fleetMode}
+				title={fleetMode
+					? 'Fleet mode on — sends to the 7-agent research fleet'
+					: 'Toggle Fleet mode'}
+			>
+				<svg
+					width="12"
+					height="12"
+					viewBox="0 0 24 24"
+					fill={fleetMode ? 'currentColor' : 'none'}
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<path d="m13 2-3 7h6l-3 13" />
+				</svg>
+				<span>Fleet</span>
+			</button>
 			<textarea
 				bind:value={composeValue}
-				placeholder={streaming ? 'Thinking…' : 'Ask anything…'}
-				disabled={streaming}
+				placeholder={dispatchingFleet
+					? 'Dispatching fleet…'
+					: streaming
+						? 'Thinking…'
+						: fleetMode
+							? 'Ask the fleet a research question…'
+							: 'Ask anything…'}
+				disabled={streaming || dispatchingFleet}
 				onkeydown={onKeydown}
 				rows="1"
 				class="text-ink placeholder:text-muted/60 min-h-[36px] flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-snug focus:outline-none"
 			></textarea>
 			<button
 				type="submit"
-				disabled={!composeValue.trim() || streaming}
+				disabled={!composeValue.trim() || streaming || dispatchingFleet}
 				class="bg-ink text-bg disabled:bg-muted/30 disabled:text-ink/50 flex h-9 w-9 items-center justify-center rounded-xl transition-opacity hover:opacity-90 disabled:cursor-default"
 				aria-label="Send"
 			>
@@ -277,5 +342,45 @@
 		transition:
 			left 180ms ease,
 			width 180ms ease;
+	}
+
+	.fleet-on {
+		border-color: color-mix(in srgb, var(--color-ink) 35%, var(--color-border)) !important;
+	}
+
+	.fleet-toggle {
+		all: unset;
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		padding: 5px 9px;
+		margin: 0 2px 0 4px;
+		border-radius: 999px;
+		font-size: 10.5px;
+		font-weight: 600;
+		letter-spacing: 0.02em;
+		text-transform: uppercase;
+		color: var(--color-muted);
+		background: color-mix(in srgb, var(--color-ink) 4%, transparent);
+		border: 1px solid var(--color-border);
+		cursor: pointer;
+		transition:
+			background 140ms ease,
+			color 140ms ease,
+			border-color 140ms ease;
+		flex-shrink: 0;
+		align-self: center;
+	}
+	.fleet-toggle:hover {
+		color: var(--color-ink);
+		border-color: color-mix(in srgb, var(--color-ink) 18%, var(--color-border));
+	}
+	.fleet-toggle.on {
+		background: var(--color-ink);
+		color: var(--color-bg);
+		border-color: var(--color-ink);
+	}
+	.fleet-toggle.on:hover {
+		opacity: 0.92;
 	}
 </style>

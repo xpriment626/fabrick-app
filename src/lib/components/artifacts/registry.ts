@@ -22,6 +22,7 @@ import CitationList from './CitationList.svelte';
 import TokenList from './TokenList.svelte';
 import DexVolumeBlock from './DexVolumeBlock.svelte';
 import ProtocolTvlStat from './ProtocolTvlStat.svelte';
+import SuggestFleet from './SuggestFleet.svelte';
 
 type ArtifactRenderer = Component<{ output: unknown }>;
 
@@ -34,9 +35,21 @@ const REGISTRY: Record<string, ArtifactRenderer> = {
 	jupiter_get_prices: JupiterPriceCards as unknown as ArtifactRenderer,
 	jupiter_search_tokens: TokenList as unknown as ArtifactRenderer,
 	news_get_articles: NewsCardList as unknown as ArtifactRenderer,
-	exa_web_search: CitationList as unknown as ArtifactRenderer
+	exa_web_search: CitationList as unknown as ArtifactRenderer,
+	suggest_fleet: SuggestFleet as unknown as ArtifactRenderer
 };
 
 export function getArtifactRenderer(toolName: string): ArtifactRenderer | null {
 	return REGISTRY[toolName] ?? null;
+}
+
+/**
+ * Tools whose UI surface is the artifact itself (not a data result the
+ * user needs to inspect). Chat page suppresses the generic ToolCallChip
+ * for these so the renderer stands alone.
+ */
+const CHIP_SUPPRESSED = new Set<string>(['suggest_fleet']);
+
+export function shouldSuppressChip(toolName: string): boolean {
+	return CHIP_SUPPRESSED.has(toolName);
 }

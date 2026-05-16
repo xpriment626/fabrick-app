@@ -99,14 +99,23 @@ export async function ensureSolanaWallet(privyDid: string) {
 }
 
 /**
- * Extract the canonical email + display name + Solana embedded wallet
- * address from a Privy user object. Privy stores everything as
- * `linkedAccounts` of various types; we flatten to the fields we need.
+ * Extract canonical identity fields from a Privy user object. Privy
+ * stores everything as `linkedAccounts` of various types; we flatten
+ * to the fields the `users` table mirrors plus any auxiliary identity
+ * fields (e.g. Twitter handle for the menu pill).
+ *
+ * Display-name precedence (best signal wins):
+ *   Twitter `name` > Twitter `@username` > email local-part > truncated DID
+ *
+ * Returns `null` for anything missing — sign-in via X-only is a valid
+ * state where `email` stays null and the wallet menu uses `displayName`
+ * for the avatar character / pill text.
  */
 export function flattenPrivyUser(user: Awaited<ReturnType<typeof fetchPrivyUser>>): {
 	email: string | null;
 	displayName: string | null;
 	solanaAddress: string | null;
+	twitterUsername: string | null;
 } {
 	const linked = user.linkedAccounts ?? [];
 
@@ -121,12 +130,21 @@ export function flattenPrivyUser(user: Awaited<ReturnType<typeof fetchPrivyUser>
 	);
 	const solanaAddress = solanaWallet?.address ?? null;
 
-	// Display name: prefer email local-part, fall back to truncated DID.
-	const displayName = email
-		? email.split('@')[0]
-		: user.id.slice('did:privy:'.length, 'did:privy:'.length + 8);
+	const twitterAccount = linked.find(
+		(a): a is Extract<typeof a, { type: 'twitter_oauth' }> => a.type === 'twitter_oauth'
+	) as
+		| { type: 'twitter_oauth'; name: string | null; username: string | null }
+		| undefined;
+	const twitterUsername = twitterAccount?.username ?? null;
+	const twitterName = twitterAccount?.name ?? null;
 
-	return { email, displayName, solanaAddress };
+	const displayName =
+		twitterName ??
+		twitterUsername ??
+		(email ? email.split('@')[0] : null) ??
+		user.id.slice('did:privy:'.length, 'did:privy:'.length + 8);
+
+	return { email, displayName, solanaAddress, twitterUsername };
 }
 
 /**

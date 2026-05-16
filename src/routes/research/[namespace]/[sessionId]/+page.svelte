@@ -13,7 +13,9 @@
 
 	// Instantiate the reactive Session with the SSR snapshot. The
 	// constructor seeds state immediately, then (in the browser) opens
-	// the WebSocket and begins applying live events.
+	// the WebSocket and begins applying live events — unless `mode` is
+	// 'archived', in which case the snapshot IS the final state and no
+	// WS subscription opens.
 	const session = new Session({
 		namespace: data.namespace,
 		sessionId: data.sessionId,
@@ -23,7 +25,21 @@
 			...t,
 			messages: t.messages ?? [],
 			unread: 0
-		}))
+		})),
+		query: data.query,
+		mode: data.mode
+	});
+
+	const isArchived = $derived(data.mode === 'archived');
+	const archivedAtLabel = $derived.by(() => {
+		if (!data.archivedAt) return '';
+		const d = new Date(data.archivedAt);
+		return d.toLocaleString([], {
+			month: 'short',
+			day: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit'
+		});
 	});
 
 	onDestroy(() => session.close());
@@ -68,10 +84,15 @@
 		<div class="mb-1 flex items-center gap-3">
 			<span
 				class="inline-block h-2 w-2 rounded-full"
-				style:background-color={session.connected ? '#16a34a' : '#999'}
+				style:background-color={isArchived ? '#a78bfa' : session.connected ? '#16a34a' : '#999'}
 			></span>
 			<span class="text-muted text-xs uppercase tracking-wide">
-				{session.connected ? 'Live' : 'Disconnected'} · {data.namespace} / {data.sessionId.slice(0, 8)}
+				{isArchived
+					? `Archived · ${archivedAtLabel}`
+					: session.connected
+						? 'Live'
+						: 'Disconnected'}
+				· {data.namespace} / {data.sessionId.slice(0, 8)}
 			</span>
 		</div>
 		<h1 class="text-ink text-[28px] font-extrabold leading-snug tracking-[-0.03em]">

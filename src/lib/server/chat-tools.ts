@@ -16,6 +16,7 @@
  */
 
 import { tool } from 'ai';
+import { z } from 'zod';
 import {
 	jupiterGetPricesInput,
 	jupiterGetPrices,
@@ -100,6 +101,26 @@ export function buildChatTools() {
 				'Single web search via Exa. Returns 3-5 results with title, URL, published date, and a short snippet. Use when the answer isn\'t available from on-chain or DefiLlama data — e.g. recent off-chain news, primary-source links, or context not in your training. ONE search per turn; don\'t loop.',
 			inputSchema: exaWebSearchInput,
 			execute: async (input) => exaWebSearch(input)
+		}),
+
+		suggest_fleet: tool({
+			description:
+				"Surface a 'Run with Fleet' chip on this reply when the question genuinely needs multi-source synthesis (onchain + news + social + web, with diversity-of-priors), not just a single tool call. Pass the user's original question verbatim as `query` and a one-sentence `reason`. Call this BEFORE writing your prose framing so the chip appears alongside your message. The user clicks to dispatch the 7-agent fleet. Don't reach for this if a single tool call would answer the question.",
+			inputSchema: z.object({
+				query: z
+					.string()
+					.min(3)
+					.describe(
+						"The user's research question, verbatim — what gets injected into the orchestrator. Keep it as the user wrote it; do not paraphrase or compress."
+					),
+				reason: z
+					.string()
+					.min(3)
+					.describe(
+						'One sentence on why this is fleet-shaped — which specialists matter and why diversity-of-priors helps.'
+					)
+			}),
+			execute: async (input) => ({ ack: true, query: input.query, reason: input.reason })
 		})
 	};
 }

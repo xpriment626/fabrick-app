@@ -20,6 +20,7 @@
 	let submitting = $state(false);
 	let errorMsg = $state<string | null>(null);
 	let loginOpen = $state(false);
+	let fleetMode = $state(false);
 
 	const authed = $derived(Boolean(page.data.user));
 
@@ -33,6 +34,23 @@
 		submitting = true;
 		errorMsg = null;
 		try {
+			if (fleetMode) {
+				const res = await fetch('/api/fleet/run', {
+					method: 'POST',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({ query: q })
+				});
+				if (!res.ok) {
+					const body = await res.text().catch(() => '');
+					throw new Error(`${res.status} ${body || res.statusText}`);
+				}
+				const data = (await res.json()) as { redirectTo?: string };
+				if (!data.redirectTo) throw new Error('Server returned no redirectTo');
+				value = '';
+				await goto(data.redirectTo);
+				return;
+			}
+
 			const res = await fetch('/api/chat', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
@@ -67,7 +85,7 @@
 			{errorMsg}
 		</div>
 	{/if}
-	<div class="ambient-pill" class:submitting>
+	<div class="ambient-pill" class:submitting class:fleet={fleetMode}>
 		<svg
 			class="leading-icon"
 			width="16"
@@ -90,14 +108,51 @@
 			<path d="m16.3 7.7 2.1-2.1" />
 		</svg>
 
+		<button
+			type="button"
+			class="fleet-toggle"
+			class:on={fleetMode}
+			onclick={() => {
+				if (!authed) {
+					loginOpen = true;
+					return;
+				}
+				fleetMode = !fleetMode;
+			}}
+			aria-pressed={fleetMode}
+			aria-label="Fleet mode"
+			title={fleetMode
+				? 'Fleet mode on — sends to the 7-agent research fleet'
+				: 'Toggle Fleet mode'}
+		>
+			<svg
+				width="13"
+				height="13"
+				viewBox="0 0 24 24"
+				fill={fleetMode ? 'currentColor' : 'none'}
+				stroke="currentColor"
+				stroke-width="2"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				aria-hidden="true"
+			>
+				<path d="m13 2-3 7h6l-3 13" />
+			</svg>
+			<span>Fleet</span>
+		</button>
+
 		<input
 			bind:value
 			type="text"
 			placeholder={!authed
 				? 'Sign in to ask Fabrick anything…'
 				: submitting
-					? 'Spinning up the fleet…'
-					: 'Ask Fabrick anything…'}
+					? fleetMode
+						? 'Dispatching fleet…'
+						: 'Spinning up…'
+					: fleetMode
+						? 'Ask the fleet a research question…'
+						: 'Ask Fabrick anything…'}
 			aria-label="Ambient chat input"
 			disabled={submitting || !authed}
 			onkeydown={onKeydown}
@@ -164,11 +219,55 @@
 			0 1px 0 rgba(255, 255, 255, 0.55) inset,
 			0 12px 30px -12px rgba(28, 25, 23, 0.12),
 			0 2px 6px -2px rgba(28, 25, 23, 0.06);
-		transition: opacity 0.2s ease;
+		transition:
+			opacity 0.2s ease,
+			border-color 0.2s ease;
 	}
 
 	.ambient-pill.submitting {
 		opacity: 0.7;
+	}
+
+	.ambient-pill.fleet {
+		border-color: color-mix(in srgb, var(--color-ink) 35%, var(--color-border));
+		box-shadow:
+			0 1px 0 rgba(255, 255, 255, 0.55) inset,
+			0 12px 30px -12px rgba(28, 25, 23, 0.18),
+			0 2px 6px -2px rgba(28, 25, 23, 0.08);
+	}
+
+	.fleet-toggle {
+		all: unset;
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		padding: 5px 10px;
+		border-radius: 999px;
+		font-size: 11px;
+		font-weight: 600;
+		letter-spacing: 0.01em;
+		text-transform: uppercase;
+		color: var(--color-muted);
+		background: color-mix(in srgb, var(--color-ink) 4%, transparent);
+		border: 1px solid var(--color-border);
+		cursor: pointer;
+		transition:
+			background 140ms ease,
+			color 140ms ease,
+			border-color 140ms ease;
+		flex-shrink: 0;
+	}
+	.fleet-toggle:hover {
+		color: var(--color-ink);
+		border-color: color-mix(in srgb, var(--color-ink) 18%, var(--color-border));
+	}
+	.fleet-toggle.on {
+		background: var(--color-ink);
+		color: var(--color-bg);
+		border-color: var(--color-ink);
+	}
+	.fleet-toggle.on:hover {
+		opacity: 0.92;
 	}
 
 	.ambient-error {
