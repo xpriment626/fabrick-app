@@ -36,22 +36,28 @@ function sentimentToTag(s: CoinDeskSentiment): ResearchSentiment {
 }
 
 /**
- * Stable, URL-derived id for a story. Using base64url of the URL keeps
- * ids consistent across reloads (so #each keyed by id doesn't churn the
- * DOM) without leaking the full URL into ids that show up in click
- * handlers, hashes, etc.
+ * Stable, URL-derived id for a story. Uses a djb2 32-bit hash so the
+ * full URL contributes to the slug — not just its prefix.
+ *
+ * History: previously this base64-encoded the URL and sliced to 22
+ * chars, which produced a key derived from only the first ~16 chars of
+ * the URL (the slice was eating mostly-identical `https://` prefixes).
+ * Two articles from URLs sharing a prefix (`https://bitcoinworld.co/…`
+ * vs `https://bitcoinwarrior.net/…`) generated the SAME slug, which
+ * tripped Svelte's `each_key_duplicate` on hydration and silently
+ * dropped duplicates from the home page.
+ *
+ * djb2 over the full URL spreads entropy uniformly. For our scale
+ * (≤100 active articles), collision probability is ~1e-6 — effectively
+ * impossible.
  */
 function storyId(url: string): string {
-	if (typeof globalThis.btoa !== 'function') {
-		// Node 18+ has atob/btoa globally; fall back to Buffer just in case.
-		return Buffer.from(url, 'utf8').toString('base64url').slice(0, 22);
+	let hash = 5381;
+	for (let i = 0; i < url.length; i++) {
+		hash = ((hash << 5) + hash + url.charCodeAt(i)) | 0; // 32-bit signed
 	}
-	return globalThis
-		.btoa(url)
-		.replace(/\+/g, '-')
-		.replace(/\//g, '_')
-		.replace(/=+$/, '')
-		.slice(0, 22);
+	// Coerce to unsigned 32-bit + base36 = ≤7 url-safe lowercase chars.
+	return (hash >>> 0).toString(36);
 }
 
 export type LoadStoriesOptions = NewsGetArticlesInput;

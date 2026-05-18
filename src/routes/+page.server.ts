@@ -29,7 +29,10 @@ import {
 	type WalletSnapshot
 } from '$lib/placeholder-data';
 
-const NEWS_CACHE_KEY = 'news:coindesk:SOL:home';
+// Bumped to v2 on 2026-05-18 — the v1 payload had storyId slugs that
+// collided (truncated base64 of URL prefix). Forces a cache miss so the
+// next render computes fresh hash-based slugs from news-to-stories.ts.
+const NEWS_CACHE_KEY = 'news:coindesk:SOL:home:v2';
 const NEWS_TTL_MS = 15 * 60 * 1000; // 15 minutes — CoinDesk's RSS aggregation refreshes on this order anyway
 
 const TRENDING_CACHE_KEY = 'defillama:trending:solana:5';
