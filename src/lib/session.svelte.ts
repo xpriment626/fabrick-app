@@ -109,6 +109,33 @@ export class Session {
 	public threads: SvelteMap<string, SessionThread> = new SvelteMap();
 	public archived = $state(false);
 
+	/** Reactive flat-list of every thread message, sorted by timestamp.
+	 *  As a `$derived.by` class field this re-evaluates automatically
+	 *  whenever the `threads` SvelteMap mutates — used directly by the
+	 *  trace UI without re-wrapping in another `$derived` at the call
+	 *  site (though wrappers are harmless). */
+	public allMessages: ThreadMessage[] = $derived.by(() => {
+		const all: ThreadMessage[] = [];
+		for (const t of this.threads.values()) {
+			for (const m of t.messages) all.push(m);
+		}
+		all.sort((a, b) => a.timestamp - b.timestamp);
+		return all;
+	});
+
+	/** The orchestrator's final synthesis turn — the orchestrator
+	 *  message with empty mentions. `null` until one lands. */
+	public finalSynthesis: ThreadMessage | null = $derived.by(() => {
+		const all = this.allMessages;
+		for (let i = all.length - 1; i >= 0; i--) {
+			const m = all[i];
+			if (m && m.senderName === 'research-orchestrator' && m.mentionNames.length === 0) {
+				return m;
+			}
+		}
+		return null;
+	});
+
 	private socket: WebSocket | null = null;
 	private archiving = false;
 
@@ -241,11 +268,11 @@ export class Session {
 				threads?: SessionThread[];
 			};
 			for (const agent of snap.agents ?? []) {
-				const existing = this.agents.get(agent.name);
 				// Overwrite — server's view of agent status is canonical
-				// at the moment of the snapshot. Live WS events resume from here.
+				// at the moment of the snapshot. Live WS events resume
+				// from here. Always sets a fresh object reference so the
+				// keyed `{#each}` over `agents.values()` re-renders.
 				this.agents.set(agent.name, { ...agent });
-				if (!existing) continue;
 			}
 			for (const thread of snap.threads ?? []) {
 				const existing = this.threads.get(thread.id);
@@ -271,74 +298,89 @@ export class Session {
 	}
 
 	private applyEvent(data: SessionEvent) {
+		// Reactivity contract: every case below MUST set a fresh object
+		// reference into the SvelteMap. Mutating a value in place + then
+		// `.set(key, sameRef)` doesn't propagate to `{#each agentsList as
+		// agent (agent.name)}` consumers because the keyed block sees the
+		// same ref + same key and skips re-rendering its bindings. Build
+		// new objects on every update. Same rule applies to arrays nested
+		// inside (messages, participants).
 		switch (data.type) {
 			case 'agent_connected': {
 				const a = this.agents.get(data.name);
 				if (!a) return console.warn('[session] agent_connected for unknown', data.name);
-				a.status = {
-					type: 'running',
-					startTime: data.timestamp,
-					connectionStatus: { type: 'connected', communicationStatus: { type: 'thinking' } }
-				};
-				this.agents.set(data.name, a);
+				this.agents.set(data.name, {
+					...a,
+					status: {
+						type: 'running',
+						startTime: data.timestamp,
+						connectionStatus: { type: 'connected', communicationStatus: { type: 'thinking' } }
+					}
+				});
 				break;
 			}
 			case 'agent_wait_start': {
 				const a = this.agents.get(data.name);
 				if (!a) return;
-				a.status = { type: 'waiting' };
-				this.agents.set(data.name, a);
+				this.agents.set(data.name, { ...a, status: { type: 'waiting' } });
 				break;
 			}
 			case 'agent_wait_stop': {
 				const a = this.agents.get(data.name);
 				if (!a) return;
-				a.status = {
-					type: 'running',
-					startTime: data.timestamp,
-					connectionStatus: { type: 'connected', communicationStatus: { type: 'thinking' } }
-				};
-				this.agents.set(data.name, a);
+				this.agents.set(data.name, {
+					...a,
+					status: {
+						type: 'running',
+						startTime: data.timestamp,
+						connectionStatus: { type: 'connected', communicationStatus: { type: 'thinking' } }
+					}
+				});
 				break;
 			}
 			case 'agent_sleep_start': {
 				const a = this.agents.get(data.name);
 				if (!a) return;
-				a.status = {
-					type: 'running',
-					startTime: data.timestamp,
-					connectionStatus: { type: 'connected', communicationStatus: { type: 'sleeping' } }
-				};
-				this.agents.set(data.name, a);
+				this.agents.set(data.name, {
+					...a,
+					status: {
+						type: 'running',
+						startTime: data.timestamp,
+						connectionStatus: { type: 'connected', communicationStatus: { type: 'sleeping' } }
+					}
+				});
 				break;
 			}
 			case 'agent_sleep_stop': {
 				const a = this.agents.get(data.name);
 				if (!a) return;
-				a.status = {
-					type: 'running',
-					startTime: data.timestamp,
-					connectionStatus: { type: 'connected', communicationStatus: { type: 'thinking' } }
-				};
-				this.agents.set(data.name, a);
+				this.agents.set(data.name, {
+					...a,
+					status: {
+						type: 'running',
+						startTime: data.timestamp,
+						connectionStatus: { type: 'connected', communicationStatus: { type: 'thinking' } }
+					}
+				});
 				break;
 			}
 			case 'runtime_started': {
 				const a = this.agents.get(data.name);
 				if (!a) return;
-				a.status = {
-					type: 'running',
-					startTime: data.timestamp,
-					connectionStatus: { type: 'not_connected' }
-				};
-				this.agents.set(data.name, a);
+				this.agents.set(data.name, {
+					...a,
+					status: {
+						type: 'running',
+						startTime: data.timestamp,
+						connectionStatus: { type: 'not_connected' }
+					}
+				});
 				break;
 			}
 			case 'runtime_stopped': {
 				const a = this.agents.get(data.name);
 				if (!a) return;
-				a.status = { type: 'stopped' };
-				this.agents.set(data.name, a);
+				this.agents.set(data.name, { ...a, status: { type: 'stopped' } });
 				break;
 			}
 			case 'thread_created': {
@@ -357,9 +399,11 @@ export class Session {
 					);
 					return;
 				}
-				t.messages = [...t.messages, data.message];
-				t.unread += 1;
-				this.threads.set(t.id, t);
+				this.threads.set(t.id, {
+					...t,
+					messages: [...t.messages, data.message],
+					unread: t.unread + 1
+				});
 				// Orchestrator + no mentions = the final synthesis. Fire
 				// the archive call once. The endpoint is idempotent on
 				// session_id, so we don't strictly need to gate on
@@ -377,48 +421,29 @@ export class Session {
 			case 'thread_closed': {
 				const t = this.threads.get(data.threadId);
 				if (!t) return;
-				t.state = { state: 'closed', summary: data.summary, timestamp: data.timestamp };
-				this.threads.set(t.id, t);
+				this.threads.set(t.id, {
+					...t,
+					state: { state: 'closed', summary: data.summary, timestamp: data.timestamp }
+				});
 				break;
 			}
 			case 'thread_participant_added': {
 				const t = this.threads.get(data.threadId);
 				if (!t) return;
-				if (!t.participants.includes(data.name)) {
-					t.participants = [...t.participants, data.name];
-					this.threads.set(t.id, t);
-				}
+				if (t.participants.includes(data.name)) return;
+				this.threads.set(t.id, { ...t, participants: [...t.participants, data.name] });
 				break;
 			}
 			case 'thread_participant_removed': {
 				const t = this.threads.get(data.threadId);
 				if (!t) return;
-				t.participants = t.participants.filter((p) => p !== data.name);
-				this.threads.set(t.id, t);
+				this.threads.set(t.id, {
+					...t,
+					participants: t.participants.filter((p) => p !== data.name)
+				});
 				break;
 			}
 		}
 	}
 
-	/** Convenience: every thread message across all threads, ordered by timestamp asc. */
-	get allMessages(): ThreadMessage[] {
-		const all: ThreadMessage[] = [];
-		for (const t of this.threads.values()) {
-			for (const m of t.messages) all.push(m);
-		}
-		all.sort((a, b) => a.timestamp - b.timestamp);
-		return all;
-	}
-
-	/** The final-synthesis convention: orchestrator message with empty mentions. */
-	get finalSynthesis(): ThreadMessage | null {
-		const all = this.allMessages;
-		for (let i = all.length - 1; i >= 0; i--) {
-			const m = all[i];
-			if (m && m.senderName === 'research-orchestrator' && m.mentionNames.length === 0) {
-				return m;
-			}
-		}
-		return null;
-	}
 }
