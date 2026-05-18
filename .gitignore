@@ -31,3 +31,8 @@ vite.config.ts.timestamp-*
 # Playwright (MCP session snapshots + screenshot output)
 .playwright-mcp
 .playwright-artifacts
+
+# Spike scratch data (throwaway scripts under scripts/)
+scripts/.spike-data/
+scripts/**/*.db
+scripts/**/*.db-journal
