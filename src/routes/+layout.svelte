@@ -9,10 +9,13 @@
 	type Props = { data: LayoutData; children: import('svelte').Snippet };
 	let { data, children }: Props = $props();
 
-	// Ambient bar is hidden on chat routes — the chat page renders its
-	// own compose. Elsewhere the ambient bar is the primary entry into
-	// a new chat.
-	const showAmbient = $derived(!page.url.pathname.startsWith('/chat/'));
+	// Ambient bar is hidden on routes that ship their own compose:
+	// /chat/[slug] (regular chat) and /discover/[slug] (story-scoped
+	// follow-up composer). Elsewhere the ambient bar is the primary
+	// entry into a new chat.
+	const showAmbient = $derived(
+		!page.url.pathname.startsWith('/chat/') && !page.url.pathname.startsWith('/discover/')
+	);
 </script>
 
 <Sidebar recents={data.recents} />

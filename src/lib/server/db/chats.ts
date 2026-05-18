@@ -16,6 +16,8 @@ import { customAlphabet } from 'nanoid';
 import { supabaseAdmin } from '$lib/server/supabase';
 import type { Database, Json } from '$lib/server/database.types';
 
+type AnchorType = Database['public']['Enums']['anchor_type'];
+
 /** 8-char base58 slug. Matches the comment on `research_sessions.slug`. */
 const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 const generateSlug = customAlphabet(BASE58, 8);
@@ -93,6 +95,8 @@ export async function createChat(args: {
 	userId: string;
 	firstUserMessage?: string;
 	title?: string;
+	anchorType?: AnchorType;
+	anchorValue?: string | null;
 }): Promise<{ slug: string; firstTurnId: string | null }> {
 	const slug = generateSlug();
 	const insert = await supabaseAdmin
@@ -100,7 +104,8 @@ export async function createChat(args: {
 		.insert({
 			slug,
 			user_id: args.userId,
-			anchor_type: 'freeform',
+			anchor_type: args.anchorType ?? 'freeform',
+			anchor_value: args.anchorValue ?? null,
 			title: args.title ?? null
 		})
 		.select('id, slug')
@@ -128,16 +133,50 @@ export async function resolveSlug(slug: string): Promise<{
 	id: string;
 	userId: string;
 	title: string | null;
+	anchorType: AnchorType;
+	anchorValue: string | null;
 } | null> {
 	const res = await supabaseAdmin
 		.from('research_sessions')
-		.select('id, user_id, title')
+		.select('id, user_id, title, anchor_type, anchor_value')
 		.eq('slug', slug)
 		.is('archived_at', null)
 		.maybeSingle();
 	if (res.error) throw new Error(`resolveSlug: ${res.error.message}`);
 	if (!res.data) return null;
-	return { id: res.data.id, userId: res.data.user_id, title: res.data.title };
+	return {
+		id: res.data.id,
+		userId: res.data.user_id,
+		title: res.data.title,
+		anchorType: res.data.anchor_type,
+		anchorValue: res.data.anchor_value
+	};
+}
+
+/**
+ * Find an existing chat anchored to a specific (anchorType, anchorValue)
+ * pair for this user — used by /discover/[slug] to reuse a prior
+ * conversation about the same story instead of creating fresh threads.
+ * Returns null if no matching chat exists.
+ */
+export async function findChatByAnchor(args: {
+	userId: string;
+	anchorType: AnchorType;
+	anchorValue: string;
+}): Promise<{ id: string; slug: string; title: string | null } | null> {
+	const res = await supabaseAdmin
+		.from('research_sessions')
+		.select('id, slug, title')
+		.eq('user_id', args.userId)
+		.eq('anchor_type', args.anchorType)
+		.eq('anchor_value', args.anchorValue)
+		.is('archived_at', null)
+		.order('updated_at', { ascending: false })
+		.limit(1)
+		.maybeSingle();
+	if (res.error) throw new Error(`findChatByAnchor: ${res.error.message}`);
+	if (!res.data) return null;
+	return { id: res.data.id, slug: res.data.slug, title: res.data.title };
 }
 
 /** Load a chat by slug for SSR rendering. */

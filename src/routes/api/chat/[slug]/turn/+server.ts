@@ -34,6 +34,7 @@ import {
 	resolveOpenrouterKey
 } from '$lib/server/chat-model';
 import { buildChatTools } from '$lib/server/chat-tools';
+import { resolveStory } from '$lib/server/discover-stories';
 
 export const POST: RequestHandler = async ({ request, params, locals }) => {
 	if (!locals.user) throw error(401, 'sign in required');
@@ -83,9 +84,16 @@ export const POST: RequestHandler = async ({ request, params, locals }) => {
 		parts: [{ type: 'text', text: m.content }]
 	}));
 
+	// Story-anchored chats get the article content prepended to the
+	// system prompt so the agent answers follow-ups with the story
+	// already loaded. Injection happens per-request — the content isn't
+	// persisted as a message turn (keeps history clean + survives story
+	// re-scrapes).
+	const systemPrompt = await composeSystemPrompt(session);
+
 	const result = streamText({
 		model: chatModel(apiKey),
-		system: CHAT_SYSTEM_PROMPT,
+		system: systemPrompt,
 		messages: await convertToModelMessages(uiHistory),
 		tools: buildChatTools(),
 		// Hard cap: 5 tool-using steps per turn. Prevents the agent from
@@ -130,6 +138,55 @@ export const POST: RequestHandler = async ({ request, params, locals }) => {
 		}
 	});
 };
+
+/**
+ * Build the system prompt for this turn. For story-anchored sessions
+ * (/discover/[slug] chats), prepend the article body + meta so the
+ * agent answers from the story content. For all other chats, the
+ * default CHAT_SYSTEM_PROMPT is returned unchanged.
+ *
+ * Injection is per-request, not persisted as a turn — keeps history
+ * clean and lets the story body refresh on the next scrape without
+ * affecting prior messages.
+ */
+async function composeSystemPrompt(session: {
+	anchorType: 'asset' | 'protocol' | 'story' | 'wallet' | 'topic' | 'freeform';
+	anchorValue: string | null;
+}): Promise<string> {
+	if (session.anchorType !== 'story' || !session.anchorValue) {
+		return CHAT_SYSTEM_PROMPT;
+	}
+
+	try {
+		const resolved = await resolveStory(session.anchorValue);
+		if (!resolved) return CHAT_SYSTEM_PROMPT;
+
+		const sourceLine = resolved.story.sources?.[0]
+			? `Source: ${resolved.story.sources[0]} — ${resolved.sourceUrl}`
+			: `Source: ${resolved.sourceUrl}`;
+
+		const storyBlock = `## Article context
+
+The user is asking follow-up questions about this article. Treat its content as authoritative reference material for the conversation. Cite specific claims back to it when relevant. If the user asks something the article doesn't cover, use your tools or say so honestly — don't fabricate details.
+
+**${resolved.story.headline}**
+${sourceLine}
+
+---
+
+${resolved.body}
+
+---
+`;
+		return `${storyBlock}\n${CHAT_SYSTEM_PROMPT}`;
+	} catch (err) {
+		console.warn(
+			`[chat/turn] story-context injection failed for ${session.anchorValue}:`,
+			err instanceof Error ? err.message : String(err)
+		);
+		return CHAT_SYSTEM_PROMPT;
+	}
+}
 
 /**
  * Produce a 3-6 word chat title from the user's first message. Runs

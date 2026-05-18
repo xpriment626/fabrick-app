@@ -22,13 +22,13 @@
 	});
 
 	/**
-	 * Card href. Live news articles carry the upstream URL on
-	 * `story.href`; future synthesized stories will link to an internal
-	 * /research/[id] page. Placeholder stories without a href just
-	 * link to '#' (anchor, no navigation).
+	 * Card href routes to the internal /discover/[id] page when the
+	 * story has an upstream URL (so we have something to resolve to);
+	 * /discover renders the article body + chat-with-story composer
+	 * and exposes the original URL inline. Placeholder stories without
+	 * an upstream URL fall through to '#' (anchor, no navigation).
 	 */
-	const href = $derived(story.href ?? '#');
-	const external = $derived(Boolean(story.href) && story.href!.startsWith('http'));
+	const href = $derived(story.href ? `/discover/${story.id}` : '#');
 
 	/**
 	 * Show the synthesized-story chrome (multiple source bubbles +
@@ -49,8 +49,6 @@
 
 <a
 	{href}
-	target={external ? '_blank' : undefined}
-	rel={external ? 'noopener noreferrer' : undefined}
 	class="block overflow-hidden rounded-card border border-border bg-surface shadow-[0_1px_2px_rgb(0_0_0/0.04)] transition-shadow hover:shadow-[0_2px_8px_rgb(0_0_0/0.06)]"
 >
 	{#if variant === 'featured'}
