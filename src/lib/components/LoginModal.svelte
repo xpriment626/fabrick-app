@@ -39,11 +39,49 @@
 		errorMsg = null;
 	}
 
+	/**
+	 * Best-effort: nuke any residual Privy session in the browser before
+	 * starting a sign-in flow. Without this, a half-state SDK session
+	 * (e.g. from a prior session whose Fabrick cookie expired or got
+	 * cleared, or a dev-server kill while signed in) makes Privy's
+	 * email-OTP path go down the "link email to current user" branch
+	 * instead of "log into email's owner," producing the cryptic
+	 * "Another user has already linked this email account" error.
+	 *
+	 * Same defensive cascade as ConnectWalletButton's signOut() since
+	 * the SDK's logout path has churned between minor versions.
+	 */
+	async function clearStalePrivySession() {
+		try {
+			const privy = await getPrivy();
+			const p = privy as unknown as {
+				logout?: () => Promise<void>;
+				user?: { logout?: () => Promise<void> };
+				auth?: { logout?: () => Promise<void> };
+			};
+			const fn = p.logout ?? p.user?.logout ?? p.auth?.logout;
+			if (typeof fn === 'function') await fn.call(privy);
+		} catch (err) {
+			console.warn('[login] privy preflight logout failed (non-fatal):', err);
+		}
+		try {
+			const keys: string[] = [];
+			for (let i = 0; i < localStorage.length; i++) {
+				const k = localStorage.key(i);
+				if (k && (k.startsWith('privy:') || k.startsWith('privy-'))) keys.push(k);
+			}
+			for (const k of keys) localStorage.removeItem(k);
+		} catch {
+			// localStorage may be blocked (private browsing strict mode); ignore.
+		}
+	}
+
 	async function sendCode() {
 		if (!email.trim()) return;
 		stage = 'sending-code';
 		errorMsg = null;
 		try {
+			await clearStalePrivySession();
 			const privy = await getPrivy();
 			await privy.auth.email.sendCode(email.trim());
 			stage = 'awaiting-code';
@@ -81,6 +119,7 @@
 		stage = 'oauth-redirecting';
 		errorMsg = null;
 		try {
+			await clearStalePrivySession();
 			const privy = await getPrivy();
 			const redirectURI = `${window.location.origin}/auth/oauth/${provider}/callback`;
 			const { url } = await privy.auth.oauth.generateURL(provider, redirectURI);
@@ -96,6 +135,7 @@
 		stage = 'passkey-pending';
 		errorMsg = null;
 		try {
+			await clearStalePrivySession();
 			const privy = await getPrivy();
 			// `passkey.login` is the API in js-sdk-core. If the user has
 			// no passkey provisioned this will reject with a userland
