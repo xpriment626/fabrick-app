@@ -16,7 +16,7 @@
 	layout's server load.
 -->
 <script lang="ts">
-	import { goto } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import type { ChatSummary } from '$lib/server/db/chats';
@@ -69,6 +69,10 @@
 			if (!res.ok) throw new Error(`${res.status}`);
 			const { slug } = (await res.json()) as { slug: string };
 			await goto(`/chat/${slug}`);
+			// Layout-level recents won't re-run on a within-layout nav,
+			// so explicitly invalidate so the new chat appears in the
+			// sidebar without requiring a hard refresh.
+			void invalidateAll();
 		} catch (err) {
 			console.error('[Sidebar] new chat failed', err);
 		} finally {
@@ -118,7 +122,46 @@
 
 	const onResearch = $derived(page.url.pathname === '/');
 	const onWallet = $derived(page.url.pathname === '/wallet');
+
+	let openMenuSlug = $state<string | null>(null);
+	let deletingSlug = $state<string | null>(null);
+
+	function toggleMenu(e: MouseEvent, slug: string) {
+		e.preventDefault();
+		e.stopPropagation();
+		openMenuSlug = openMenuSlug === slug ? null : slug;
+	}
+
+	function onWindowClick(e: MouseEvent) {
+		if (!openMenuSlug) return;
+		const target = e.target as Element | null;
+		if (!target?.closest(`[data-menu-for="${openMenuSlug}"]`)) {
+			openMenuSlug = null;
+		}
+	}
+
+	async function deleteChat(slug: string) {
+		if (deletingSlug) return;
+		deletingSlug = slug;
+		openMenuSlug = null;
+		try {
+			const res = await fetch(`/api/chat/${encodeURIComponent(slug)}`, {
+				method: 'DELETE'
+			});
+			if (!res.ok) throw new Error(`${res.status}`);
+			// If the user is sitting inside the chat they just deleted,
+			// punt them to home — the route would 404 otherwise.
+			if (slug === currentChatSlug) await goto('/');
+			void invalidateAll();
+		} catch (err) {
+			console.error('[Sidebar] delete chat failed', err);
+		} finally {
+			deletingSlug = null;
+		}
+	}
 </script>
+
+<svelte:window onclick={onWindowClick} />
 
 <aside class="sidebar" class:expanded aria-label="Main navigation">
 	<!-- Top: brand + collapse toggle -->
@@ -249,15 +292,53 @@
 						<div class="history-bucket-label">{bucket.label}</div>
 						<ul class="history-list">
 							{#each bucket.items as chat (chat.slug)}
-								<li>
+								<li
+									class="history-row"
+									class:current={chat.slug === currentChatSlug}
+									class:menu-open={openMenuSlug === chat.slug}
+								>
 									<a
 										href="/chat/{chat.slug}"
 										class="history-link"
-										class:current={chat.slug === currentChatSlug}
 										title={chat.title || 'New chat'}
 									>
 										{chat.title || 'New chat'}
 									</a>
+									<div class="history-menu-wrap" data-menu-for={chat.slug}>
+										<button
+											type="button"
+											class="history-menu-btn"
+											aria-label="Chat options"
+											aria-haspopup="menu"
+											aria-expanded={openMenuSlug === chat.slug}
+											onclick={(e) => toggleMenu(e, chat.slug)}
+										>
+											<svg
+												width="14"
+												height="14"
+												viewBox="0 0 24 24"
+												fill="currentColor"
+												aria-hidden="true"
+											>
+												<circle cx="5" cy="12" r="1.5" />
+												<circle cx="12" cy="12" r="1.5" />
+												<circle cx="19" cy="12" r="1.5" />
+											</svg>
+										</button>
+										{#if openMenuSlug === chat.slug}
+											<div class="history-menu" role="menu">
+												<button
+													type="button"
+													role="menuitem"
+													class="history-menu-item danger"
+													disabled={deletingSlug === chat.slug}
+													onclick={() => deleteChat(chat.slug)}
+												>
+													{deletingSlug === chat.slug ? 'Deleting…' : 'Delete'}
+												</button>
+											</div>
+										{/if}
+									</div>
 								</li>
 							{/each}
 						</ul>
@@ -451,25 +532,100 @@
 		flex-direction: column;
 		gap: 0;
 	}
+	.history-row {
+		position: relative;
+		display: flex;
+		align-items: stretch;
+		border-radius: 6px;
+		transition: background-color 120ms ease;
+	}
+	.history-row:hover,
+	.history-row.menu-open {
+		background: color-mix(in srgb, var(--color-ink) 4%, transparent);
+	}
+	.history-row.current {
+		background: color-mix(in srgb, var(--color-ink) 8%, transparent);
+	}
 	.history-link {
+		flex: 1;
+		min-width: 0;
 		display: block;
 		padding: 6px 8px;
 		font-size: 13px;
 		color: var(--color-ink);
 		text-decoration: none;
-		border-radius: 6px;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
-		max-width: 100%;
-		transition: background-color 120ms ease;
 	}
-	.history-link:hover {
-		background: color-mix(in srgb, var(--color-ink) 4%, transparent);
-	}
-	.history-link.current {
-		background: color-mix(in srgb, var(--color-ink) 8%, transparent);
+	.history-row.current .history-link {
 		font-weight: 500;
+	}
+	.history-menu-wrap {
+		position: relative;
+		display: flex;
+		align-items: center;
+		opacity: 0;
+		transition: opacity 120ms ease;
+		padding-right: 4px;
+	}
+	.history-row:hover .history-menu-wrap,
+	.history-row.menu-open .history-menu-wrap {
+		opacity: 1;
+	}
+	.history-menu-btn {
+		all: unset;
+		cursor: pointer;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 22px;
+		height: 22px;
+		border-radius: 5px;
+		color: var(--color-muted);
+		transition:
+			background-color 120ms ease,
+			color 120ms ease;
+	}
+	.history-menu-btn:hover {
+		background: color-mix(in srgb, var(--color-ink) 8%, transparent);
+		color: var(--color-ink);
+	}
+	.history-menu {
+		position: absolute;
+		top: calc(100% + 4px);
+		right: 0;
+		min-width: 130px;
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: 8px;
+		padding: 4px;
+		box-shadow: 0 12px 24px -8px rgba(28, 25, 23, 0.16);
+		z-index: 20;
+		display: flex;
+		flex-direction: column;
+	}
+	.history-menu-item {
+		all: unset;
+		cursor: pointer;
+		padding: 7px 10px;
+		border-radius: 6px;
+		font-size: 13px;
+		font-weight: 500;
+		color: var(--color-ink);
+	}
+	.history-menu-item:hover {
+		background: color-mix(in srgb, var(--color-ink) 6%, transparent);
+	}
+	.history-menu-item.danger {
+		color: #b91c1c;
+	}
+	.history-menu-item.danger:hover {
+		background: color-mix(in srgb, #dc2626 8%, transparent);
+	}
+	.history-menu-item:disabled {
+		opacity: 0.5;
+		cursor: default;
 	}
 
 	.footer {

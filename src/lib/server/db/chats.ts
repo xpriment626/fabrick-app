@@ -81,10 +81,20 @@ export type ChatTurn = {
 };
 
 export type LoadedChat = {
+	id: string;
 	slug: string;
 	title: string | null;
 	userId: string;
 	turns: ChatTurn[];
+};
+
+/** A fleet run dispatched from this chat — surfaced as a re-entry link
+ *  in the chat UI so the user can navigate back to /research/[ns]/[sid]. */
+export type ChatFleetRun = {
+	coralSessionId: string;
+	status: Database['public']['Enums']['run_status'];
+	startedAt: string;
+	finishedAt: string | null;
 };
 
 /**
@@ -202,7 +212,34 @@ export async function loadChat(slug: string): Promise<LoadedChat | null> {
 		createdAt: t.created_at
 	}));
 
-	return { slug, title: session.title, userId: session.userId, turns };
+	return { id: session.id, slug, title: session.title, userId: session.userId, turns };
+}
+
+/**
+ * List fleet runs (Coral sessions) that were dispatched from this chat,
+ * newest first. Used by the chat page to render re-entry links so the
+ * user can navigate back into a fleet trace they kicked off here.
+ */
+export async function listFleetRunsForChat(
+	sessionId: string,
+	limit = 10
+): Promise<ChatFleetRun[]> {
+	const res = await supabaseAdmin
+		.from('research_runs')
+		.select('coral_session_id, status, started_at, finished_at')
+		.eq('session_id', sessionId)
+		.not('coral_session_id', 'is', null)
+		.order('started_at', { ascending: false })
+		.limit(limit);
+	if (res.error) throw new Error(`listFleetRunsForChat: ${res.error.message}`);
+	return (res.data ?? [])
+		.filter((r): r is typeof r & { coral_session_id: string } => r.coral_session_id !== null)
+		.map((r) => ({
+			coralSessionId: r.coral_session_id,
+			status: r.status,
+			startedAt: r.started_at,
+			finishedAt: r.finished_at
+		}));
 }
 
 /** Append a turn. Returns the new turn id. */
@@ -255,6 +292,28 @@ export async function listChats(userId: string, limit = 30): Promise<ChatSummary
 		createdAt: s.created_at,
 		updatedAt: s.updated_at
 	}));
+}
+
+/**
+ * Soft-delete a chat by setting `archived_at`. `loadChat` /
+ * `resolveSlug` / `listChats` all filter by `archived_at IS NULL`, so
+ * the row disappears from the UI without hard-deletion + cascading
+ * turn deletes. Reversible from SQL if needed.
+ *
+ * Returns true if a row was archived, false if the slug didn't exist
+ * or wasn't owned by `userId` (caller can map to a 404/403).
+ */
+export async function archiveChat(slug: string, userId: string): Promise<boolean> {
+	const res = await supabaseAdmin
+		.from('research_sessions')
+		.update({ archived_at: new Date().toISOString() })
+		.eq('slug', slug)
+		.eq('user_id', userId)
+		.is('archived_at', null)
+		.select('id')
+		.maybeSingle();
+	if (res.error) throw new Error(`archiveChat: ${res.error.message}`);
+	return Boolean(res.data);
 }
 
 /** Set the chat's title (used after first-turn title generation). */

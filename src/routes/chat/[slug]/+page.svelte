@@ -2,6 +2,8 @@
 	import { onMount, tick } from 'svelte';
 	import { goto, invalidateAll } from '$app/navigation';
 	import ToolCallChip from '$lib/components/ToolCallChip.svelte';
+	import Markdown from '$lib/components/Markdown.svelte';
+	import ChatComposer from '$lib/components/ChatComposer.svelte';
 	import { getArtifactRenderer, shouldSuppressChip } from '$lib/components/artifacts/registry';
 	import { readUIMessages } from '$lib/client/ui-message-stream';
 	import type { PageData } from './$types';
@@ -11,7 +13,9 @@
 	let { data }: Props = $props();
 
 	// Local reactive copy of turns — server-loaded turns + any
-	// in-flight turn we're streaming.
+	// in-flight turn we're streaming. Intentional initial-value
+	// capture; the $effect.pre below resyncs from `data` on slug change.
+	// svelte-ignore state_referenced_locally
 	let turns = $state<ChatTurn[]>([...data.chat.turns]);
 	let composeValue = $state('');
 	let streaming = $state(false);
@@ -19,6 +23,54 @@
 	let listEl: HTMLDivElement;
 	let fleetMode = $state(false);
 	let dispatchingFleet = $state(false);
+
+	// Sticky scroll: only auto-scroll the message list when the user is
+	// already at (or near) the bottom. If they scrolled up to read older
+	// content, leave them where they are while streaming continues
+	// invisibly below.
+	let stickToBottom = $state(true);
+	const STICK_THRESHOLD_PX = 80;
+
+	// SvelteKit reuses this component instance when the user navigates
+	// between chat slugs (/chat/A → /chat/B). The `data` prop updates
+	// reactively, but local `$state` is initialized once at component
+	// construction — so without this effect, navigating to a different
+	// chat would keep the prior chat's turns rendered on screen and
+	// "silently" only refresh on hard reload.
+	//
+	// Reset every piece of local state when the slug changes, so the new
+	// chat loads as if from a fresh mount.
+	// svelte-ignore state_referenced_locally
+	let currentSlug = $state(data.chat.slug);
+	$effect.pre(() => {
+		if (data.chat.slug === currentSlug) return;
+		currentSlug = data.chat.slug;
+		turns = [...data.chat.turns];
+		composeValue = '';
+		streaming = false;
+		dispatchingFleet = false;
+		fleetMode = false;
+		errorMsg = null;
+		stickToBottom = true;
+		// Defer scroll until after Svelte renders the new turns.
+		queueMicrotask(() => scrollToBottom({ force: true }));
+	});
+
+	function updateStickFromScroll() {
+		if (!listEl) return;
+		const distanceFromBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight;
+		stickToBottom = distanceFromBottom < STICK_THRESHOLD_PX;
+	}
+
+	const placeholder = $derived(
+		dispatchingFleet
+			? 'Dispatching fleet…'
+			: streaming
+				? 'Thinking…'
+				: fleetMode
+					? 'Ask the fleet a research question…'
+					: 'Ask anything…'
+	);
 
 	async function dispatchFleet(content: string) {
 		if (dispatchingFleet) return;
@@ -43,9 +95,14 @@
 		}
 	}
 
-	async function scrollToBottom() {
+	async function scrollToBottom(opts: { force?: boolean } = {}) {
+		if (!opts.force && !stickToBottom) return;
 		await tick();
-		listEl?.scrollTo({ top: listEl.scrollHeight, behavior: 'smooth' });
+		// `behavior: 'auto'` during streaming — smooth scrolling fires
+		// scroll events that race with stickToBottom detection and can
+		// flip it false mid-scroll. Instant scroll is also what Claude
+		// + Perplexity do for streaming chat output.
+		listEl?.scrollTo({ top: listEl.scrollHeight, behavior: 'auto' });
 	}
 
 	async function sendTurn(content: string, opts: { alreadyPersisted?: boolean } = {}) {
@@ -136,11 +193,17 @@
 		}
 	}
 
-	function onCompose(e: SubmitEvent) {
-		e.preventDefault();
+	/** ChatComposer's onSubmit handler — runs synchronously, clears the
+	 * value, then fan-outs to the streaming or fleet-dispatch path. The
+	 * composer handles textarea-height reset on its side. */
+	function onComposerSubmit() {
 		const text = composeValue.trim();
 		if (!text || streaming || dispatchingFleet) return;
 		composeValue = '';
+		// Submitting a new turn re-engages stickiness — the user wants
+		// to see their reply land at the bottom even if they were
+		// scrolled up reading prior context.
+		stickToBottom = true;
 		if (fleetMode) {
 			dispatchFleet(text);
 		} else {
@@ -148,16 +211,8 @@
 		}
 	}
 
-	function onKeydown(e: KeyboardEvent) {
-		if (e.key === 'Enter' && !e.shiftKey) {
-			e.preventDefault();
-			const form = (e.target as HTMLElement).closest('form');
-			form?.requestSubmit();
-		}
-	}
-
 	onMount(() => {
-		scrollToBottom();
+		scrollToBottom({ force: true });
 		if (data.autosend && turns.length === 1 && turns[0]?.role === 'user') {
 			sendTurn(turns[0].content, { alreadyPersisted: true });
 		}
@@ -194,6 +249,31 @@
 		if (!renderer) return null;
 		return { renderer, output: tp.output };
 	}
+
+	function fleetRunHref(coralSessionId: string): string {
+		return `/research/${encodeURIComponent(data.chat.slug)}/${encodeURIComponent(coralSessionId)}`;
+	}
+
+	function fleetRunLabel(status: string, startedAt: string): string {
+		const d = new Date(startedAt);
+		const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+		const date = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+		const prefix =
+			status === 'running'
+				? 'In progress'
+				: status === 'complete'
+					? 'Completed'
+					: status === 'failed'
+						? 'Failed'
+						: 'Fleet run';
+		return `${prefix} · ${date} ${time}`;
+	}
+
+	function fleetStatusColor(status: string): string {
+		if (status === 'running') return '#16a34a';
+		if (status === 'failed') return '#dc2626';
+		return 'var(--color-muted)';
+	}
 </script>
 
 <main class="mx-auto flex min-h-screen max-w-[820px] flex-col px-8 py-6">
@@ -203,7 +283,45 @@
 		</h1>
 	</header>
 
-	<div bind:this={listEl} class="flex-1 space-y-5 overflow-y-auto pb-32">
+	{#if data.fleetRuns.length > 0}
+		<section class="fleet-runs">
+			<div class="fleet-runs-label">Fleet runs from this chat</div>
+			<ul class="fleet-runs-list">
+				{#each data.fleetRuns as run (run.coralSessionId)}
+					<li>
+						<a class="fleet-run-card" href={fleetRunHref(run.coralSessionId)}>
+							<span
+								class="fleet-run-dot"
+								class:pulsing={run.status === 'running'}
+								style:background-color={fleetStatusColor(run.status)}
+							></span>
+							<span class="fleet-run-text">{fleetRunLabel(run.status, run.startedAt)}</span>
+							<svg
+								width="12"
+								height="12"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								aria-hidden="true"
+							>
+								<path d="M7 17 17 7" />
+								<path d="M7 7h10v10" />
+							</svg>
+						</a>
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
+
+	<div
+		bind:this={listEl}
+		onscroll={updateStickFromScroll}
+		class="flex-1 space-y-5 overflow-y-auto pb-32"
+	>
 		{#each turns as turn (turn.id)}
 			{#if turn.role === 'user'}
 				<div class="flex justify-end">
@@ -227,9 +345,11 @@
 
 					{#each parts as part, i (i)}
 						{#if isTextPart(part)}
-							<div class="text-ink whitespace-pre-wrap text-[15px] leading-relaxed">
-								{(part as { text: string }).text}
-							</div>
+							<Markdown
+								text={(part as { text: string }).text}
+								variant="chat"
+								class="text-ink text-[15px] leading-relaxed"
+							/>
 						{:else if isToolPart(part)}
 							{@const artifact = artifactFor(part)}
 							{@const toolName = (part as ToolPart).type.replace(/^tool-/, '')}
@@ -264,72 +384,20 @@
 		{/if}
 	</div>
 
-	<form onsubmit={onCompose} class="compose">
-		<div
-			class="border-border bg-surface flex items-end gap-2 rounded-2xl border p-2 shadow-sm"
-			class:fleet-on={fleetMode}
-		>
-			<button
-				type="button"
-				class="fleet-toggle"
-				class:on={fleetMode}
-				onclick={() => (fleetMode = !fleetMode)}
-				aria-pressed={fleetMode}
-				title={fleetMode
-					? 'Fleet mode on — sends to the 7-agent research fleet'
-					: 'Toggle Fleet mode'}
-			>
-				<svg
-					width="12"
-					height="12"
-					viewBox="0 0 24 24"
-					fill={fleetMode ? 'currentColor' : 'none'}
-					stroke="currentColor"
-					stroke-width="2"
-					stroke-linecap="round"
-					stroke-linejoin="round"
-					aria-hidden="true"
-				>
-					<path d="m13 2-3 7h6l-3 13" />
-				</svg>
-				<span>Fleet</span>
-			</button>
-			<textarea
-				bind:value={composeValue}
-				placeholder={dispatchingFleet
-					? 'Dispatching fleet…'
-					: streaming
-						? 'Thinking…'
-						: fleetMode
-							? 'Ask the fleet a research question…'
-							: 'Ask anything…'}
-				disabled={streaming || dispatchingFleet}
-				onkeydown={onKeydown}
-				rows="1"
-				class="text-ink placeholder:text-muted/60 min-h-[36px] flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-snug focus:outline-none"
-			></textarea>
-			<button
-				type="submit"
-				disabled={!composeValue.trim() || streaming || dispatchingFleet}
-				class="bg-ink text-bg disabled:bg-muted/30 disabled:text-ink/50 flex h-9 w-9 items-center justify-center rounded-xl transition-opacity hover:opacity-90 disabled:cursor-default"
-				aria-label="Send"
-			>
-				<svg
-					width="14"
-					height="14"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2.5"
-					stroke-linecap="round"
-					stroke-linejoin="round"
-				>
-					<path d="M5 12h14" />
-					<path d="m13 6 6 6-6 6" />
-				</svg>
-			</button>
-		</div>
-	</form>
+	<div class="compose">
+		<ChatComposer
+			bind:value={composeValue}
+			{placeholder}
+			disabled={streaming || dispatchingFleet}
+			submitting={streaming || dispatchingFleet}
+			showFleet={true}
+			fleetActive={fleetMode}
+			onFleetToggle={() => (fleetMode = !fleetMode)}
+			onSubmit={onComposerSubmit}
+			variant="embedded"
+			label="Chat input"
+		/>
+	</div>
 </main>
 
 <style>
@@ -344,43 +412,64 @@
 			width 180ms ease;
 	}
 
-	.fleet-on {
-		border-color: color-mix(in srgb, var(--color-ink) 35%, var(--color-border)) !important;
+	.fleet-runs {
+		margin-bottom: 16px;
 	}
-
-	.fleet-toggle {
-		all: unset;
-		display: inline-flex;
-		align-items: center;
-		gap: 4px;
-		padding: 5px 9px;
-		margin: 0 2px 0 4px;
-		border-radius: 999px;
-		font-size: 10.5px;
+	.fleet-runs-label {
+		font-size: 11px;
 		font-weight: 600;
-		letter-spacing: 0.02em;
+		letter-spacing: 0.06em;
 		text-transform: uppercase;
 		color: var(--color-muted);
-		background: color-mix(in srgb, var(--color-ink) 4%, transparent);
+		margin-bottom: 6px;
+	}
+	.fleet-runs-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+	.fleet-run-card {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 8px 12px;
 		border: 1px solid var(--color-border);
-		cursor: pointer;
-		transition:
-			background 140ms ease,
-			color 140ms ease,
-			border-color 140ms ease;
-		flex-shrink: 0;
-		align-self: center;
-	}
-	.fleet-toggle:hover {
+		background: var(--color-surface);
+		border-radius: 10px;
 		color: var(--color-ink);
-		border-color: color-mix(in srgb, var(--color-ink) 18%, var(--color-border));
+		font-size: 13px;
+		text-decoration: none;
+		transition:
+			background-color 120ms ease,
+			border-color 120ms ease;
 	}
-	.fleet-toggle.on {
-		background: var(--color-ink);
-		color: var(--color-bg);
-		border-color: var(--color-ink);
+	.fleet-run-card:hover {
+		background: color-mix(in srgb, var(--color-ink) 3%, var(--color-surface));
+		border-color: color-mix(in srgb, var(--color-ink) 20%, var(--color-border));
 	}
-	.fleet-toggle.on:hover {
-		opacity: 0.92;
+	.fleet-run-dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		flex-shrink: 0;
+	}
+	.fleet-run-dot.pulsing {
+		animation: pulse-soft 1.6s ease-in-out infinite;
+	}
+	.fleet-run-text {
+		flex: 1;
+		font-weight: 500;
+	}
+	@keyframes pulse-soft {
+		0%,
+		100% {
+			opacity: 1;
+		}
+		50% {
+			opacity: 0.35;
+		}
 	}
 </style>

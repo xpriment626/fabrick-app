@@ -18,6 +18,8 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { createSession, sessionEventsWsUrl } from '$lib/server/coral';
 import { buildOrchestratorSessionRequest } from '$lib/server/session-request';
+import { resolveSlug } from '$lib/server/db/chats';
+import { supabaseAdmin } from '$lib/server/supabase';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) throw error(401, 'sign in required');
@@ -44,6 +46,27 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 	try {
 		const { namespace, sessionId } = await createSession(sessionRequest);
+
+		// If the dispatched slug maps to an actual chat owned by this
+		// user, persist a research_runs row linking the Coral session to
+		// the chat. The chat page reads these to surface "re-enter this
+		// fleet run" cards — without this row, dispatched runs would be
+		// reachable only from the URL the user just navigated to.
+		const linkedChat = await resolveSlug(slug).catch(() => null);
+		if (linkedChat && linkedChat.userId === locals.user.id) {
+			const insertRes = await supabaseAdmin.from('research_runs').insert({
+				session_id: linkedChat.id,
+				coral_session_id: sessionId,
+				status: 'running',
+				started_at: new Date().toISOString()
+			});
+			if (insertRes.error) {
+				// Non-fatal — the run is alive, the user just won't see a
+				// chat-side re-entry card. Log + continue.
+				console.warn('[fleet/run] research_runs insert failed:', insertRes.error.message);
+			}
+		}
+
 		const redirectTo = `/research/${encodeURIComponent(namespace)}/${encodeURIComponent(
 			sessionId
 		)}?q=${encodeURIComponent(query)}`;

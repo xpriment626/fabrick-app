@@ -1,20 +1,18 @@
 <!--
 	Ambient chat bar — fixed at the bottom of the viewport, persistent
-	across every route via the layout. Glass-like (light translucent over
-	a backdrop blur) so the content behind shows through diffused.
+	across every route via the layout (except routes that ship their
+	own compose, like /chat/[slug] and /discover/[slug]).
 
-	Submits to /api/chat (creates a chat with the typed text as the first
-	user turn), then navigates to /chat/{slug}?autosend=1 where the chat
-	page picks up the seeded message and triggers the model streaming.
-
-	Anonymous users see a "Sign in to chat" CTA instead — clicking
-	opens the login modal. After auth the page reloads, the bar
-	switches to live mode.
+	The compose primitive is `ChatComposer` (variant="ambient" for the
+	glass look); this component just owns the fixed positioning + the
+	submit-routing logic (creates a chat / kicks off a fleet run /
+	opens the login modal for anon users).
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import LoginModal from './LoginModal.svelte';
+	import ChatComposer from './ChatComposer.svelte';
 
 	let value = $state('');
 	let submitting = $state(false);
@@ -23,6 +21,17 @@
 	let fleetMode = $state(false);
 
 	const authed = $derived(Boolean(page.data.user));
+	const placeholder = $derived(
+		!authed
+			? 'Sign in to ask Fabrick anything…'
+			: submitting
+				? fleetMode
+					? 'Dispatching fleet…'
+					: 'Spinning up…'
+				: fleetMode
+					? 'Ask the fleet a research question…'
+					: 'Ask Fabrick anything…'
+	);
 
 	async function submit() {
 		if (!authed) {
@@ -69,11 +78,12 @@
 		}
 	}
 
-	function onKeydown(e: KeyboardEvent) {
-		if (e.key === 'Enter' && !e.shiftKey) {
-			e.preventDefault();
-			void submit();
-		}
+	function onAnonClick() {
+		loginOpen = true;
+	}
+
+	function onFleetToggle() {
+		fleetMode = !fleetMode;
 	}
 </script>
 
@@ -85,105 +95,20 @@
 			{errorMsg}
 		</div>
 	{/if}
-	<div class="ambient-pill" class:submitting class:fleet={fleetMode}>
-		<svg
-			class="leading-icon"
-			width="16"
-			height="16"
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="currentColor"
-			stroke-width="2"
-			stroke-linecap="round"
-			stroke-linejoin="round"
-			aria-hidden="true"
-		>
-			<path d="M12 3v3" />
-			<path d="M12 18v3" />
-			<path d="M3 12h3" />
-			<path d="M18 12h3" />
-			<path d="m5.6 5.6 2.1 2.1" />
-			<path d="m16.3 16.3 2.1 2.1" />
-			<path d="m5.6 18.4 2.1-2.1" />
-			<path d="m16.3 7.7 2.1-2.1" />
-		</svg>
 
-		<button
-			type="button"
-			class="fleet-toggle"
-			class:on={fleetMode}
-			onclick={() => {
-				if (!authed) {
-					loginOpen = true;
-					return;
-				}
-				fleetMode = !fleetMode;
-			}}
-			aria-pressed={fleetMode}
-			aria-label="Fleet mode"
-			title={fleetMode
-				? 'Fleet mode on — sends to the 7-agent research fleet'
-				: 'Toggle Fleet mode'}
-		>
-			<svg
-				width="13"
-				height="13"
-				viewBox="0 0 24 24"
-				fill={fleetMode ? 'currentColor' : 'none'}
-				stroke="currentColor"
-				stroke-width="2"
-				stroke-linecap="round"
-				stroke-linejoin="round"
-				aria-hidden="true"
-			>
-				<path d="m13 2-3 7h6l-3 13" />
-			</svg>
-			<span>Fleet</span>
-		</button>
-
-		<input
-			bind:value
-			type="text"
-			placeholder={!authed
-				? 'Sign in to ask Fabrick anything…'
-				: submitting
-					? fleetMode
-						? 'Dispatching fleet…'
-						: 'Spinning up…'
-					: fleetMode
-						? 'Ask the fleet a research question…'
-						: 'Ask Fabrick anything…'}
-			aria-label="Ambient chat input"
-			disabled={submitting || !authed}
-			onkeydown={onKeydown}
-			onclick={() => {
-				if (!authed) loginOpen = true;
-			}}
-		/>
-
-		<button
-			type="button"
-			class="send-btn"
-			aria-label={authed ? 'Send' : 'Sign in'}
-			disabled={authed && (!value.trim() || submitting)}
-			onclick={submit}
-		>
-			<svg
-				width="14"
-				height="14"
-				viewBox="0 0 24 24"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="2.5"
-				stroke-linecap="round"
-				stroke-linejoin="round"
-				aria-hidden="true"
-			>
-				<path d="M5 12h14" />
-				<path d="m13 6 6 6-6 6" />
-			</svg>
-		</button>
-	</div>
+	<ChatComposer
+		bind:value
+		{placeholder}
+		disabled={!authed}
+		{submitting}
+		showFleet={true}
+		fleetActive={fleetMode}
+		{onFleetToggle}
+		onSubmit={submit}
+		onDisabledClick={onAnonClick}
+		variant="ambient"
+		label="Ambient chat input"
+	/>
 </div>
 
 <style>
@@ -204,72 +129,6 @@
 			width 180ms ease;
 	}
 
-	.ambient-pill {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		height: 56px;
-		padding: 0 6px 0 18px;
-		border-radius: var(--radius-pill);
-		background: color-mix(in srgb, var(--color-surface) 68%, transparent);
-		backdrop-filter: blur(20px) saturate(140%);
-		-webkit-backdrop-filter: blur(20px) saturate(140%);
-		border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
-		box-shadow:
-			0 1px 0 rgba(255, 255, 255, 0.55) inset,
-			0 12px 30px -12px rgba(28, 25, 23, 0.12),
-			0 2px 6px -2px rgba(28, 25, 23, 0.06);
-		transition:
-			opacity 0.2s ease,
-			border-color 0.2s ease;
-	}
-
-	.ambient-pill.submitting {
-		opacity: 0.7;
-	}
-
-	.ambient-pill.fleet {
-		border-color: color-mix(in srgb, var(--color-ink) 35%, var(--color-border));
-		box-shadow:
-			0 1px 0 rgba(255, 255, 255, 0.55) inset,
-			0 12px 30px -12px rgba(28, 25, 23, 0.18),
-			0 2px 6px -2px rgba(28, 25, 23, 0.08);
-	}
-
-	.fleet-toggle {
-		all: unset;
-		display: inline-flex;
-		align-items: center;
-		gap: 4px;
-		padding: 5px 10px;
-		border-radius: 999px;
-		font-size: 11px;
-		font-weight: 600;
-		letter-spacing: 0.01em;
-		text-transform: uppercase;
-		color: var(--color-muted);
-		background: color-mix(in srgb, var(--color-ink) 4%, transparent);
-		border: 1px solid var(--color-border);
-		cursor: pointer;
-		transition:
-			background 140ms ease,
-			color 140ms ease,
-			border-color 140ms ease;
-		flex-shrink: 0;
-	}
-	.fleet-toggle:hover {
-		color: var(--color-ink);
-		border-color: color-mix(in srgb, var(--color-ink) 18%, var(--color-border));
-	}
-	.fleet-toggle.on {
-		background: var(--color-ink);
-		color: var(--color-bg);
-		border-color: var(--color-ink);
-	}
-	.fleet-toggle.on:hover {
-		opacity: 0.92;
-	}
-
 	.ambient-error {
 		margin-bottom: 8px;
 		padding: 8px 14px;
@@ -279,60 +138,5 @@
 		color: #b91c1c;
 		font-size: 13px;
 		font-weight: 500;
-	}
-
-	.leading-icon {
-		color: var(--color-muted);
-		flex-shrink: 0;
-		opacity: 0.85;
-	}
-
-	input {
-		flex: 1;
-		min-width: 0;
-		background: transparent;
-		border: none;
-		outline: none;
-		font-family: inherit;
-		font-size: 14px;
-		font-weight: 500;
-		color: var(--color-ink);
-		letter-spacing: -0.005em;
-	}
-
-	input::placeholder {
-		color: color-mix(in srgb, var(--color-muted) 90%, transparent);
-		font-weight: 500;
-	}
-
-	.send-btn {
-		flex-shrink: 0;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 44px;
-		height: 44px;
-		border: none;
-		border-radius: var(--radius-pill);
-		background: var(--color-ink);
-		color: var(--color-bg);
-		cursor: pointer;
-		transition:
-			opacity 0.15s ease,
-			transform 0.15s ease;
-	}
-
-	.send-btn:disabled {
-		background: color-mix(in srgb, var(--color-muted) 30%, transparent);
-		color: color-mix(in srgb, var(--color-ink) 50%, transparent);
-		cursor: default;
-	}
-
-	.send-btn:not(:disabled):hover {
-		opacity: 0.92;
-	}
-
-	.send-btn:not(:disabled):active {
-		transform: scale(0.97);
 	}
 </style>

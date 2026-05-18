@@ -1,6 +1,6 @@
 import { error, redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { loadChat } from '$lib/server/db/chats';
+import { loadChat, listFleetRunsForChat } from '$lib/server/db/chats';
 
 export const load: PageServerLoad = async ({ params, url, locals }) => {
 	if (!locals.user) throw redirect(302, '/');
@@ -12,8 +12,17 @@ export const load: PageServerLoad = async ({ params, url, locals }) => {
 	// Recents now come from the root +layout.server.ts (global sidebar
 	// reads them via $page.data). No per-route fetch needed here.
 
+	// Surface fleet runs dispatched from this chat so the user can
+	// navigate back into them. Failure is non-fatal — empty list just
+	// hides the section.
+	const fleetRuns = await listFleetRunsForChat(chat.id).catch((err) => {
+		console.warn('[chat/load] listFleetRunsForChat failed:', err);
+		return [];
+	});
+
 	return {
 		chat,
+		fleetRuns,
 		// If `?autosend=1`, the client knows the last user turn is fresh
 		// and needs to be sent to the model. Set by AmbientChatBar after
 		// creating a new chat with a seeded first message.
