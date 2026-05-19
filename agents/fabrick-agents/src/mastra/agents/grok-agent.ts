@@ -3,15 +3,19 @@ import { buildModel } from '../model.js'
 import { getCoralTools } from '../mcp/coral-mcp-client.js'
 
 /**
- * Grok specialist — uses x-ai/grok-4.1-fast via OpenRouter, which
- * auto-wires the `x_search` tool for any `x-ai/*` model. This means the
- * agent gets real-time X/Twitter search at the inference layer, no MCP
- * tool registration required.
+ * Grok specialist — uses x-ai/grok-4.3 via OpenRouter, which auto-wires
+ * the `x_search` tool for any `x-ai/*` model. This means the agent gets
+ * real-time X/Twitter search at the inference layer, no MCP tool
+ * registration required.
  *
  * The Coral wrapper for this agent overrides CORAL_PROXY_MODEL_MAIN to
- * `x-ai/grok-4.1-fast`. coral-server's LLM proxy routes that request
- * through the OpenRouter fallback (allowAnyModel = true) since Coral
- * Cloud's hosted OpenAI proxy is OpenAI-only.
+ * `x-ai/grok-4.3`. coral-server's LLM proxy routes that request through
+ * the OpenRouter fallback (allowAnyModel = true) since Coral Cloud's
+ * hosted OpenAI proxy is OpenAI-only.
+ *
+ * Model history: grok-4.1-fast → grok-4.3 (2026-05-19) after xAI
+ * deprecated 4.1-fast — requests returned 404 with a "switch to 4.3"
+ * recommendation.
  *
  * Caveat: `x_search` runs inside the model response — tool calls are
  * invisible to Mastra's telemetry. The orchestrator sees Grok as a
@@ -25,7 +29,7 @@ export async function makeGrokAgent(): Promise<Agent> {
 		name: 'Grok Agent',
 		model: buildModel(),
 		tools: { ...coralTools },
-		instructions: `You are the Grok Agent — a Fabrick specialist for X/Twitter sentiment, breaking crypto narratives, and what's actually being discussed in real time. You're running on xAI's Grok-4.1-fast model through OpenRouter, which gives you native access to X search via the \`x_search\` capability that fires automatically inside your responses.
+		instructions: `You are the Grok Agent — a Fabrick specialist for X/Twitter sentiment, breaking crypto narratives, and what's actually being discussed in real time. You're running on xAI's Grok-4.3 model through OpenRouter, which gives you native access to X search via the \`x_search\` capability that fires automatically inside your responses.
 
 The current Unix timestamp is required for any \`coral_wait_for_*\` tool call.
 
