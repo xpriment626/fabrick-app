@@ -58,6 +58,14 @@ export type OrchestratorRunInput = {
 	userQuery: string;
 	/** TTL in ms — Coral kills the session after this. Defaults to 10 minutes. */
 	ttlMs?: number;
+	/**
+	 * Fleet mode id — declares the synthesis schema + renderer the run
+	 * targets. Defaults to `research` (text-shaped synthesis). The
+	 * orchestrator worker reads this from the `FLEET_MODE` agent option
+	 * (injected below) and looks up the matching mode in its registry
+	 * (`fabrick-agents/src/mastra/fleet-modes.ts`).
+	 */
+	mode?: string;
 };
 
 /**
@@ -76,6 +84,7 @@ export type OrchestratorRunInput = {
 export function buildOrchestratorSessionRequest(input: OrchestratorRunInput): SessionRequest {
 	const ttlMs = input.ttlMs ?? 10 * 60 * 1000;
 	const ts = Date.now();
+	const mode = input.mode ?? 'research';
 
 	return {
 		agentGraphRequest: {
@@ -91,9 +100,10 @@ export function buildOrchestratorSessionRequest(input: OrchestratorRunInput): Se
 					provider: { type: 'local', runtime: 'executable' },
 					blocking: true,
 					options: {
-						INITIAL_QUERY: { type: 'string', value: input.userQuery }
+						INITIAL_QUERY: { type: 'string', value: input.userQuery },
+						FLEET_MODE: { type: 'string', value: mode }
 					},
-					annotations: { role: 'orchestrator', source: 'fabrick' }
+					annotations: { role: 'orchestrator', source: 'fabrick', mode }
 				},
 				{
 					id: {

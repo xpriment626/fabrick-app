@@ -14,9 +14,11 @@
 	import { onDestroy } from 'svelte';
 	import {
 		Session,
+		FLEET_SYNTHESIS_ENVELOPE_KEY,
 		type SessionAgent,
 		type SessionThread,
-		type ThreadMessage
+		type ThreadMessage,
+		type FleetSynthesis
 	} from '$lib/session.svelte';
 	import Markdown from '$lib/components/Markdown.svelte';
 
@@ -79,7 +81,23 @@
 
 	const messagesView = $derived(session.allMessages);
 	const finalSynthesis = $derived(session.finalSynthesis);
+	const synthesisPayload = $derived(session.synthesisPayload);
 	const agentsList = $derived(Array.from(session.agents.values()));
+
+	/** Best-effort body text for a trace message — unwraps the synthesis
+	 *  envelope when present so the raw JSON doesn't render in the trace
+	 *  reel. Falls through to the raw text for everything else. */
+	function bodyForTrace(text: string): string {
+		if (!text || text[0] !== '{') return text;
+		try {
+			const parsed = JSON.parse(text) as Record<string, unknown>;
+			const inner = parsed[FLEET_SYNTHESIS_ENVELOPE_KEY] as FleetSynthesis | undefined;
+			if (inner?.type === 'text' && typeof inner.body === 'string') return inner.body;
+		} catch {
+			/* not JSON, render raw */
+		}
+		return text;
+	}
 
 	function commStatusLabel(agent: SessionAgent): string {
 		const s = agent.status;
@@ -151,15 +169,25 @@
 		</div>
 	</section>
 
-	<!-- Final synthesis callout — appears the moment it lands -->
+	<!-- Final synthesis callout — appears the moment it lands. Switches
+	     on the typed payload (v0: only `text`). Falls back to the raw
+	     message body for legacy runs that didn't ship an envelope. -->
 	{#if finalSynthesis}
 		<section class="mb-6 rounded-lg border border-[#d97757]/30 bg-[#d97757]/5 p-5">
 			<div class="text-muted mb-2 text-xs uppercase tracking-wide">Synthesis</div>
-			<Markdown
-				text={finalSynthesis.text}
-				variant="chat"
-				class="text-ink text-[15px] leading-relaxed"
-			/>
+			{#if synthesisPayload?.type === 'text'}
+				<Markdown
+					text={synthesisPayload.body}
+					variant="chat"
+					class="text-ink text-[15px] leading-relaxed"
+				/>
+			{:else}
+				<Markdown
+					text={finalSynthesis.text}
+					variant="chat"
+					class="text-ink text-[15px] leading-relaxed"
+				/>
+			{/if}
 			<div class="text-muted mt-3 text-xs">
 				{formatTs(finalSynthesis.timestamp)}
 			</div>
@@ -192,7 +220,11 @@
 							</div>
 							<span class="text-muted text-xs">{formatTs(msg.timestamp)}</span>
 						</div>
-						<Markdown text={msg.text} variant="chat" class="text-ink text-sm leading-relaxed" />
+						<Markdown
+							text={bodyForTrace(msg.text)}
+							variant="chat"
+							class="text-ink text-sm leading-relaxed"
+						/>
 					</li>
 				{/each}
 			</ol>

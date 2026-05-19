@@ -23,6 +23,43 @@
 
 import { SvelteMap } from 'svelte/reactivity';
 
+/* -------------- synthesis envelope ------------------------------------ */
+
+/**
+ * Discriminated union of fleet synthesis shapes. Must mirror the schema
+ * declared in `fabrick-agents/src/mastra/fleet-modes.ts` — that schema
+ * is the wire authority; this is the consumer-side type. v0 ships only
+ * the `text` variant. Future variants add cases here + matching
+ * renderers without touching the transport.
+ *
+ * On the wire: the orchestrator worker JSON-stringifies
+ * `{ [ENVELOPE_KEY]: FleetSynthesis }` and sends it as the
+ * `coral_send_message` content. Plain-text messages without the
+ * envelope key fall back to legacy rendering (treat `message.text` as
+ * markdown body).
+ */
+export type FleetSynthesis = { type: 'text'; body: string };
+
+export const FLEET_SYNTHESIS_ENVELOPE_KEY = '__fabrick_synthesis__';
+
+/** Parse a coral message text payload for a fleet synthesis envelope.
+ *  Returns the typed synthesis if present, `null` otherwise. Errors are
+ *  swallowed — non-JSON / non-envelope payloads just fall through. */
+function parseSynthesisEnvelope(text: string): FleetSynthesis | null {
+	if (!text || text.length < 2 || text[0] !== '{') return null;
+	try {
+		const parsed = JSON.parse(text) as Record<string, unknown>;
+		const inner = parsed[FLEET_SYNTHESIS_ENVELOPE_KEY] as FleetSynthesis | undefined;
+		if (!inner || typeof inner !== 'object') return null;
+		if (inner.type === 'text' && typeof (inner as { body?: unknown }).body === 'string') {
+			return inner;
+		}
+		return null;
+	} catch {
+		return null;
+	}
+}
+
 /* -------------- types (hand-written; trim of coral-server schema) ----- */
 
 export type AgentCommunicationStatus =
@@ -136,6 +173,19 @@ export class Session {
 		return null;
 	});
 
+	/** The structured synthesis payload, parsed from the envelope on the
+	 *  final synthesis message. `null` if no synthesis has landed yet, or
+	 *  if it's a legacy run (pre-mode-registry) whose message body isn't
+	 *  a Fabrick envelope. Consumers should prefer this over
+	 *  `finalSynthesis.text` for rendering — it's typed and version-stable.
+	 *  Legacy renderers can fall back to `finalSynthesis.text` when this
+	 *  is null but `finalSynthesis` is not. */
+	public synthesisPayload: FleetSynthesis | null = $derived.by(() => {
+		const m = this.finalSynthesis;
+		if (!m) return null;
+		return parseSynthesisEnvelope(m.text);
+	});
+
 	private socket: WebSocket | null = null;
 	private archiving = false;
 
@@ -216,11 +266,20 @@ export class Session {
 		this.archiving = true;
 		try {
 			const synthesis = this.finalSynthesis;
+			const payload = this.synthesisPayload;
+			// Prefer the unwrapped body from the typed envelope for the
+			// archive's `synthesis_text` column (human-readable). Fall
+			// back to the raw message text only for legacy runs that
+			// didn't ship the envelope.
+			const synthesisText =
+				payload?.type === 'text'
+					? payload.body
+					: (synthesis?.text ?? null);
 			const body = {
 				namespace: this.namespace,
 				sessionId: this.sessionId,
 				query: this.query,
-				synthesisText: synthesis?.text ?? null,
+				synthesisText,
 				trace: {
 					agents: Array.from(this.agents.values()),
 					threads: Array.from(this.threads.values()).map((t) => ({

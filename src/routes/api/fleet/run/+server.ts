@@ -24,11 +24,11 @@ import { supabaseAdmin } from '$lib/server/supabase';
 export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) throw error(401, 'sign in required');
 
-	let body: { query?: unknown; slug?: unknown } = {};
+	let body: { query?: unknown; slug?: unknown; mode?: unknown } = {};
 	try {
 		body = await request.json();
 	} catch {
-		throw error(400, 'expected JSON body { query: string, slug?: string }');
+		throw error(400, 'expected JSON body { query: string, slug?: string, mode?: string }');
 	}
 
 	const query = typeof body.query === 'string' ? body.query.trim() : '';
@@ -39,9 +39,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			? body.slug.trim().slice(0, 32)
 			: `fleet-${Date.now().toString(36)}`;
 
+	// `mode` selects the synthesis schema + renderer. v0 only ships
+	// `research` (text); unknown modes fall back to that. Worker-side
+	// validates against its registry and FATALs on unknown ids — falling
+	// back here keeps a typo in the client from killing the dispatch.
+	const mode = typeof body.mode === 'string' && body.mode.trim() ? body.mode.trim() : 'research';
+
 	const sessionRequest = buildOrchestratorSessionRequest({
 		sessionSlug: slug,
-		userQuery: query
+		userQuery: query,
+		mode
 	});
 
 	try {
