@@ -25,6 +25,7 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { archiveFleetRun } from '$lib/server/libsql';
+import { supabaseAdmin } from '$lib/server/supabase';
 
 type Body = {
 	namespace?: unknown;
@@ -90,6 +91,28 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			messageCount,
 			createdAt: startedAt
 		});
+
+		// Flip the `research_runs` lifecycle to `complete`. This is the
+		// chat-side mirror of the Turso archive: the chat page reads
+		// `research_runs` to render re-entry cards with a status pill
+		// (running / complete / failed), and without this update they'd
+		// be stuck on "In progress" forever.
+		//
+		// Best-effort: a missing row (anonymous / non-chat runs that
+		// aren't linked to a `research_sessions` slug) is expected and
+		// silent. A DB error is logged but doesn't fail the archive.
+		const updateRes = await supabaseAdmin
+			.from('research_runs')
+			.update({ status: 'complete', finished_at: new Date().toISOString() })
+			.eq('coral_session_id', sessionId)
+			.in('status', ['running', 'queued']);
+		if (updateRes.error) {
+			console.warn(
+				`[fleet/archive] research_runs status update failed for ${sessionId}:`,
+				updateRes.error.message
+			);
+		}
+
 		return json({ id: row.id, completedAt: row.completedAt });
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
