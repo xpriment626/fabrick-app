@@ -1,0 +1,44 @@
+edition = 4
+
+[agent]
+name = "fabrick-research-orchestrator"
+version = "0.1.0"
+description = "Orchestrates the Fabrick deep-research multi-agent fleet — decomposes user queries, dispatches to specialists, synthesizes findings."
+readme = "Fabrick deep-research orchestrator"
+summary = "Plans + synthesizes Fabrick research turns"
+
+[agent.license]
+type = "text"
+text = "Apache-2.0"
+
+[options.auto_launch]
+type = "string"
+default = "false"
+
+# Initial user query — Fabrick passes this via SessionRequest at run time so
+# the orchestrator has a question to answer on first turn. Empty by default
+# so standalone (non-Coral) launches don't fail validation.
+[options.INITIAL_QUERY]
+type = "string"
+default = ""
+
+# Fleet mode id — declares the synthesis schema + renderer for this run.
+# Worker (coral-worker.ts) looks this up in the mode registry at
+# fabrick-app/agents/fabrick-agents/src/mastra/fleet-modes.ts.
+# Defaults to "research" (text-shaped synthesis, matches v0 behavior).
+[options.FLEET_MODE]
+type = "string"
+default = "research"
+
+[runtimes.executable]
+path = "bash"
+arguments = ["startup.sh"]
+transport = "streamable_http"
+
+[[llm.proxies]]
+name = "MAIN"
+format.type = "OpenAI"
+# gpt-5.4-mini: cost-balanced frontier-tier for agentic loops. Served
+# natively by Coral Cloud (covered by account credits); falls back to
+# OpenRouter if CC is unavailable.
+models = ["anthropic/claude-haiku-4.5"]
