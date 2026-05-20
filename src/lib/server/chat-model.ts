@@ -46,14 +46,14 @@ export async function resolveOpenrouterKey(userId: string): Promise<string> {
 }
 
 /**
- * Default chat model — Haiku 4.5. Surprisingly sharp conversationally
- * for the cost/latency tier; we'll consider Sonnet / Opus as
- * user-selectable upgrades when a richer reasoning budget is needed.
+ * Default chat model — MiniMax M2.5 via OpenRouter. Cost-delta test
+ * branch: dramatically cheaper than Haiku 4.5; we want to see what
+ * breaks (if anything) before doing any prompt hardening.
  */
-export const CHAT_MODEL_ID = 'anthropic/claude-haiku-4.5';
+export const CHAT_MODEL_ID = 'minimax/minimax-m2.5';
 
 /** Fast/cheap model for utility calls like title generation. */
-export const TITLE_MODEL_ID = 'openai/gpt-5.4-mini';
+export const TITLE_MODEL_ID = 'minimax/minimax-m2.5';
 
 /**
  * Construct a per-request OpenRouter provider. Don't cache — each

@@ -15,7 +15,7 @@ import { createOpenAI } from '@ai-sdk/openai'
  */
 export function buildModel(modelOverride?: string) {
 	const proxyUrl = process.env.CORAL_PROXY_URL_MAIN
-	const proxyModel = process.env.CORAL_PROXY_MODEL_MAIN ?? 'gpt-5.4-mini'
+	const proxyModel = process.env.CORAL_PROXY_MODEL_MAIN ?? 'minimax/minimax-m2.5'
 	const modelName = modelOverride ?? proxyModel
 
 	if (proxyUrl) {
