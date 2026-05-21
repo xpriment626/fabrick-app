@@ -10,6 +10,8 @@
  */
 
 import type { Handle } from '@sveltejs/kit';
+import { dev } from '$app/environment';
+import { env } from '$env/dynamic/private';
 import { SESSION_COOKIE_NAME, verifyFabrickSessionToken } from '$lib/server/auth';
 import { supabaseAdmin } from '$lib/server/supabase';
 
@@ -45,6 +47,39 @@ export const handle: Handle = async ({ event, resolve }) => {
 				'[hooks] session token rejected:',
 				err instanceof Error ? err.message : String(err)
 			);
+		}
+	}
+
+	// Dev-only auth bypass. Lets Playwright (and manual local browsing)
+	// hit gated routes without the Privy login dance. Double-gated: only
+	// fires under `vite dev` (compiled to false in any prod build) AND
+	// when DEV_AUTH_PRIVY_DID is explicitly set. It resolves a REAL users
+	// row (not a synthetic id) so downstream Supabase FK references hold.
+	//   DEV_AUTH_PRIVY_DID=<did>  → impersonate that user
+	//   DEV_AUTH_PRIVY_DID=*      → grab the first users row (zero-config)
+	if (dev && !event.locals.user && env.DEV_AUTH_PRIVY_DID) {
+		const wantsFirst = env.DEV_AUTH_PRIVY_DID === '*';
+		const base = supabaseAdmin
+			.from('users')
+			.select('privy_user_id, email, display_name, solana_address');
+		const { data: rows, error } = await (wantsFirst
+			? base.limit(1)
+			: base.eq('privy_user_id', env.DEV_AUTH_PRIVY_DID).limit(1));
+		const row = rows?.[0];
+		if (error) {
+			console.warn('[hooks] dev auth bypass lookup failed:', error.message);
+		} else if (row) {
+			event.locals.user = {
+				id: row.privy_user_id,
+				email: row.email,
+				displayName: row.display_name,
+				solanaAddress: row.solana_address
+			};
+			console.warn(
+				`[hooks] ⚠ DEV AUTH BYPASS active — authed as ${row.email ?? row.privy_user_id}`
+			);
+		} else {
+			console.warn('[hooks] dev auth bypass set but no users row found');
 		}
 	}
 
