@@ -1,13 +1,32 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import { goto, invalidateAll } from '$app/navigation';
+	import { invalidateAll } from '$app/navigation';
 	import ToolCallChip from '$lib/components/ToolCallChip.svelte';
 	import Markdown from '$lib/components/Markdown.svelte';
 	import ChatComposer from '$lib/components/ChatComposer.svelte';
+	import FleetTraceInline from '$lib/components/FleetTraceInline.svelte';
 	import { getArtifactRenderer, shouldSuppressChip } from '$lib/components/artifacts/registry';
 	import { readUIMessages } from '$lib/client/ui-message-stream';
 	import type { PageData } from './$types';
 	import type { ChatTurn, TurnPart } from '$lib/server/db/chats';
+	import type { SessionAgent, SessionThread } from '$lib/session.svelte';
+
+	/** Client-only part the chat page synthesizes when a fleet run is
+	 *  dispatched from this chat. Carries everything FleetTraceInline
+	 *  needs to subscribe to the live Coral session. Not persisted as a
+	 *  research_turn — on reload, prior runs appear in the existing
+	 *  `data.fleetRuns` re-entry list at the top of the chat. */
+	type FleetTracePart = {
+		type: 'fleet-trace';
+		namespace: string;
+		sessionId: string;
+		eventsWsUrl: string;
+		query: string;
+		startedAt: number;
+		initialAgents: SessionAgent[];
+		initialThreads: SessionThread[];
+		mode: 'live' | 'archived';
+	};
 
 	type Props = { data: PageData };
 	let { data }: Props = $props();
@@ -76,6 +95,46 @@
 		if (dispatchingFleet) return;
 		dispatchingFleet = true;
 		errorMsg = null;
+
+		// Optimistically render the user's query as a chat bubble. Not
+		// persisted server-side yet (the kickoff endpoint only writes a
+		// research_runs row); on reload it disappears, the same way the
+		// pre-inline behavior worked.
+		const userTurnId = `local-user-${Date.now()}`;
+		turns = [
+			...turns,
+			{
+				id: userTurnId,
+				role: 'user',
+				agentName: null,
+				content,
+				parts: null,
+				status: 'complete',
+				runId: null,
+				createdAt: new Date().toISOString()
+			}
+		];
+
+		// Placeholder assistant turn — replaced with the fleet-trace part
+		// once we have the Coral sessionId. Keeps the timeline ordered if
+		// the kickoff takes a second.
+		const fleetTurnId = `fleet-${Date.now()}`;
+		turns = [
+			...turns,
+			{
+				id: fleetTurnId,
+				role: 'assistant',
+				agentName: 'fleet',
+				content: '',
+				parts: [],
+				status: 'streaming',
+				runId: null,
+				createdAt: new Date().toISOString()
+			}
+		];
+		stickToBottom = true;
+		scrollToBottom();
+
 		try {
 			const res = await fetch('/api/fleet/run', {
 				method: 'POST',
@@ -86,11 +145,39 @@
 				const body = await res.text().catch(() => '');
 				throw new Error(`fleet kickoff failed: ${res.status} ${body || res.statusText}`);
 			}
-			const out = (await res.json()) as { redirectTo?: string };
-			if (!out.redirectTo) throw new Error('Server returned no redirectTo');
-			await goto(out.redirectTo);
+			const out = (await res.json()) as {
+				namespace?: string;
+				sessionId?: string;
+				eventsWsUrl?: string;
+			};
+			if (!out.namespace || !out.sessionId || !out.eventsWsUrl) {
+				throw new Error('Server returned an incomplete fleet kickoff payload');
+			}
+
+			const fleetPart: FleetTracePart = {
+				type: 'fleet-trace',
+				namespace: out.namespace,
+				sessionId: out.sessionId,
+				eventsWsUrl: out.eventsWsUrl,
+				query: content,
+				startedAt: Date.now(),
+				initialAgents: [],
+				initialThreads: [],
+				mode: 'live'
+			};
+
+			turns = turns.map((t) =>
+				t.id === fleetTurnId ? { ...t, parts: [fleetPart as TurnPart] } : t
+			);
+			scrollToBottom();
+
+			// Surface the new run in the top "Fleet runs from this chat"
+			// list on next nav — non-fatal if it lags.
+			setTimeout(() => invalidateAll(), 1500);
 		} catch (err) {
 			errorMsg = err instanceof Error ? err.message : String(err);
+			turns = turns.filter((t) => t.id !== fleetTurnId && t.id !== userTurnId);
+		} finally {
 			dispatchingFleet = false;
 		}
 	}
@@ -333,15 +420,20 @@
 				</div>
 			{:else}
 				{@const parts = partsForTurn(turn)}
+				{@const hasFleetTrace = parts.some(
+					(p) => (p as { type: string }).type === 'fleet-trace'
+				)}
 				<div class="flex flex-col gap-2">
-					<div class="text-muted flex items-center gap-2 text-xs uppercase tracking-wide">
-						<span>{turn.agentName ?? 'assistant'}</span>
-						{#if turn.status === 'streaming'}
-							<span
-								class="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[#d97757]"
-							></span>
-						{/if}
-					</div>
+					{#if !hasFleetTrace}
+						<div class="text-muted flex items-center gap-2 text-xs uppercase tracking-wide">
+							<span>{turn.agentName ?? 'assistant'}</span>
+							{#if turn.status === 'streaming'}
+								<span
+									class="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[#d97757]"
+								></span>
+							{/if}
+						</div>
+					{/if}
 
 					{#each parts as part, i (i)}
 						{#if isTextPart(part)}
@@ -349,6 +441,18 @@
 								text={(part as { text: string }).text}
 								variant="chat"
 								class="text-ink text-[15px] leading-relaxed"
+							/>
+						{:else if (part as { type: string }).type === 'fleet-trace'}
+							{@const fp = part as unknown as FleetTracePart}
+							<FleetTraceInline
+								namespace={fp.namespace}
+								sessionId={fp.sessionId}
+								query={fp.query}
+								eventsWsUrl={fp.eventsWsUrl}
+								initialAgents={fp.initialAgents}
+								initialThreads={fp.initialThreads}
+								mode={fp.mode}
+								startedAt={fp.startedAt}
 							/>
 						{:else if isToolPart(part)}
 							{@const artifact = artifactFor(part)}
