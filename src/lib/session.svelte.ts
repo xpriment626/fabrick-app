@@ -60,6 +60,43 @@ function parseSynthesisEnvelope(text: string): FleetSynthesis | null {
 	}
 }
 
+/** Coral serializes message timestamps as ISO-8601 strings (the same as
+ *  thread/session timestamps), even though our `ThreadMessage.timestamp`
+ *  contract is epoch-ms `number`. The trace UI does arithmetic on these
+ *  (elapsed duration, chronological `allMessages` sort), and `string -
+ *  number` / `string - string` both yield NaN — which surfaced as a
+ *  "Fleet completed · NaNh NaNm" header. Coerce every ingested message to
+ *  epoch-ms so the `number` contract holds. Tolerates already-numeric
+ *  values; falls back to now() for anything unparseable. */
+function toEpochMs(ts: unknown): number {
+	if (typeof ts === 'number' && Number.isFinite(ts)) return ts;
+	if (typeof ts === 'string') {
+		const parsed = Date.parse(ts);
+		if (Number.isFinite(parsed)) return parsed;
+	}
+	return Date.now();
+}
+
+function normalizeMessages(messages: ThreadMessage[] | undefined): ThreadMessage[] {
+	return (messages ?? []).map((m) => ({ ...m, timestamp: toEpochMs(m.timestamp) }));
+}
+
+/** Union two message lists by id. The snapshot (`incoming`) is
+ *  authoritative for content, but messages present only in `existing`
+ *  are preserved — that's what keeps a live WS message we've already
+ *  applied (or a self-heal placeholder) from being clobbered when a
+ *  reconcile snapshot hasn't caught up to it yet. Order doesn't matter
+ *  here; `allMessages` re-sorts by timestamp. */
+function mergeMessagesById(
+	existing: ThreadMessage[],
+	incoming: ThreadMessage[] | undefined
+): ThreadMessage[] {
+	const byId = new Map<string, ThreadMessage>();
+	for (const m of existing) byId.set(m.id, m);
+	for (const m of normalizeMessages(incoming)) byId.set(m.id, m);
+	return Array.from(byId.values());
+}
+
 /* -------------- types (hand-written; trim of coral-server schema) ----- */
 
 export type AgentCommunicationStatus =
@@ -188,6 +225,7 @@ export class Session {
 
 	private socket: WebSocket | null = null;
 	private archiving = false;
+	private reconcilePending = false;
 
 	constructor(opts: SessionInitOptions & { query?: string; mode?: SessionMode }) {
 		this.namespace = opts.namespace;
@@ -203,6 +241,7 @@ export class Session {
 		for (const thread of opts.initialThreads) {
 			this.threads.set(thread.id, {
 				...thread,
+				messages: normalizeMessages(thread.messages),
 				unread: 0
 			});
 		}
@@ -336,17 +375,19 @@ export class Session {
 			for (const thread of snap.threads ?? []) {
 				const existing = this.threads.get(thread.id);
 				if (existing) {
-					// Merge: keep client's unread counter, replace
-					// authoritative fields (messages, participants, state).
+					// Union messages by id rather than blindly replacing —
+					// a live WS message (or a self-heal placeholder) we've
+					// already applied may not be in this snapshot yet, and we
+					// must not lose it. Keep the client's unread counter.
 					this.threads.set(thread.id, {
 						...thread,
-						messages: thread.messages ?? [],
+						messages: mergeMessagesById(existing.messages, thread.messages),
 						unread: existing.unread
 					});
 				} else {
 					this.threads.set(thread.id, {
 						...thread,
-						messages: thread.messages ?? [],
+						messages: normalizeMessages(thread.messages),
 						unread: 0
 					});
 				}
@@ -354,6 +395,18 @@ export class Session {
 		} catch (err) {
 			console.warn('[session] reconcile failed:', err);
 		}
+	}
+
+	/** Debounced reconcile trigger. Coalesces bursts of unknown-thread
+	 *  events into a single snapshot refetch so a race that drops messages
+	 *  self-heals without hammering the snapshot endpoint. */
+	private scheduleReconcile(): void {
+		if (this.reconcilePending || this.mode === 'archived') return;
+		this.reconcilePending = true;
+		setTimeout(() => {
+			this.reconcilePending = false;
+			void this.reconcileFromSnapshot();
+		}, 250);
 	}
 
 	private applyEvent(data: SessionEvent) {
@@ -445,31 +498,48 @@ export class Session {
 			case 'thread_created': {
 				this.threads.set(data.thread.id, {
 					...data.thread,
+					messages: normalizeMessages(data.thread.messages),
 					unread: data.thread.messages.length
 				});
 				break;
 			}
 			case 'thread_message_sent': {
-				const t = this.threads.get(data.message.threadId);
+				const incoming = { ...data.message, timestamp: toEpochMs(data.message.timestamp) };
+				const t = this.threads.get(incoming.threadId);
 				if (!t) {
+					// Self-heal instead of dropping. The thread was created
+					// after our one-shot WS-open reconcile and we never saw a
+					// `thread_created` for it (WS/reconcile race) — previously
+					// every message for it was silently discarded, leaving the
+					// trace blank while agents worked. Register a placeholder
+					// carrying this message so it survives, then reconcile to
+					// backfill thread metadata + any earlier missed messages.
 					console.warn(
-						'[session] thread_message_sent for unknown thread',
-						data.message.threadId
+						'[session] thread_message_sent for untracked thread — self-healing via reconcile',
+						incoming.threadId
 					);
-					return;
+					this.threads.set(incoming.threadId, {
+						id: incoming.threadId,
+						participants: [],
+						messages: [incoming],
+						unread: 1
+					});
+					this.scheduleReconcile();
+				} else {
+					this.threads.set(t.id, {
+						...t,
+						messages: [...t.messages, incoming],
+						unread: t.unread + 1
+					});
 				}
-				this.threads.set(t.id, {
-					...t,
-					messages: [...t.messages, data.message],
-					unread: t.unread + 1
-				});
-				// Orchestrator + no mentions = the final synthesis. Fire
-				// the archive call once. The endpoint is idempotent on
-				// session_id, so we don't strictly need to gate on
-				// `archived`, but skipping the redundant request is free.
+				// Orchestrator + no mentions = the final synthesis. Fire the
+				// archive call once (runs whichever branch above took). The
+				// endpoint is idempotent on session_id, so we don't strictly
+				// need to gate on `archived`, but skipping the redundant
+				// request is free.
 				if (
-					data.message.senderName === 'research-orchestrator' &&
-					data.message.mentionNames.length === 0 &&
+					incoming.senderName === 'research-orchestrator' &&
+					incoming.mentionNames.length === 0 &&
 					!this.archived &&
 					!this.archiving
 				) {
