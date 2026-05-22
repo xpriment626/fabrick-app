@@ -46,13 +46,17 @@ export async function resolveOpenrouterKey(userId: string): Promise<string> {
 }
 
 /**
- * Default chat model — Haiku 4.5. Surprisingly sharp conversationally
- * for the cost/latency tier; we'll consider Sonnet / Opus as
- * user-selectable upgrades when a richer reasoning budget is needed.
+ * Default chat model — DeepSeek V4 Pro via OpenRouter. ~75% cheaper than
+ * the prior Haiku 4.5 for conservative rapid testing; it's a reasoning
+ * model (1M context), so expect a little more latency than Haiku in
+ * exchange for the cost drop. Swap back here if interactive latency
+ * becomes the priority over spend.
  */
-export const CHAT_MODEL_ID = 'anthropic/claude-haiku-4.5';
+export const CHAT_MODEL_ID = 'deepseek/deepseek-v4-pro';
 
-/** Fast/cheap model for utility calls like title generation. */
+/** Fast/cheap model for utility calls like title generation. Kept on a
+ * non-reasoning model on purpose — titles don't benefit from reasoning
+ * and we don't want the extra latency on a throwaway one-shot call. */
 export const TITLE_MODEL_ID = 'openai/gpt-5.4-mini';
 
 /**

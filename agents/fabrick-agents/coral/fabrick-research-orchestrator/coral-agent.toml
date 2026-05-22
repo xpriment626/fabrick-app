@@ -38,7 +38,11 @@ transport = "streamable_http"
 [[llm.proxies]]
 name = "MAIN"
 format.type = "OpenAI"
-# Haiku 4.5 via OpenRouter (coral-server fallback proxy) — the fleet's
-# default reasoning model. Retune per agent by editing this line; no
-# coral-server config changes needed under the coraliser link pattern.
-models = ["anthropic/claude-haiku-4.5"]
+# DeepSeek V4 Pro via OpenRouter (coral-server fallback proxy) — the
+# fleet's default reasoning model. ~75% cheaper than the prior Haiku/OAI
+# mix, for conservative rapid test runs. Safe on the executable runtime
+# (the Mastra worker owns the loop, so reasoning tokens are handled by
+# the AI SDK — the prototype-runtime infinite-think trap doesn't apply).
+# Retune per agent by editing this line; openrouter-main has
+# allowAnyModel=true so no coral-server config change is needed.
+models = ["deepseek/deepseek-v4-pro"]
