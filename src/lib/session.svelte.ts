@@ -157,7 +157,10 @@ type SessionEvent =
 	| { type: 'thread_message_sent'; message: ThreadMessage; timestamp: string }
 	| { type: 'thread_closed'; threadId: string; summary: string; timestamp: string }
 	| { type: 'thread_participant_added'; threadId: string; name: string; timestamp: string }
-	| { type: 'thread_participant_removed'; threadId: string; name: string; timestamp: string };
+	| { type: 'thread_participant_removed'; threadId: string; name: string; timestamp: string }
+	// Synthetic frame the fleet-gateway injects when a run settles without a
+	// synthesis (coral closed early / errored / timed out). Not a coral event.
+	| { type: 'gateway_run_failed'; reason: string; timestamp: string };
 
 /* -------------- Session class ----------------------------------------- */
 
@@ -179,6 +182,9 @@ export class Session {
 	readonly startedAt: number;
 
 	public connected = $state(false);
+	/** Set when the gateway reports the run failed (no synthesis). Drives the
+	 *  loud failure banner in the trace UIs instead of an endless timer. */
+	public failed = $state<{ reason: string } | null>(null);
 	public agents: SvelteMap<string, SessionAgent> = new SvelteMap();
 	public threads: SvelteMap<string, SessionThread> = new SvelteMap();
 	public archived = $state(false);
@@ -224,7 +230,6 @@ export class Session {
 	});
 
 	private socket: WebSocket | null = null;
-	private archiving = false;
 	private reconcilePending = false;
 
 	constructor(opts: SessionInitOptions & { query?: string; mode?: SessionMode }) {
@@ -291,63 +296,6 @@ export class Session {
 	close() {
 		this.socket?.close();
 		this.socket = null;
-	}
-
-	/**
-	 * Push the current full state to the Turso archive. Fired once,
-	 * the moment the orchestrator's final synthesis lands. The server
-	 * endpoint is idempotent on (user_id, session_id) — retries are
-	 * safe — but we still gate on `archived`/`archiving` to avoid
-	 * redundant HTTP calls.
-	 */
-	private async archiveRun(): Promise<void> {
-		if (this.mode === 'archived' || this.archived || this.archiving) return;
-		this.archiving = true;
-		try {
-			const synthesis = this.finalSynthesis;
-			const payload = this.synthesisPayload;
-			// Prefer the unwrapped body from the typed envelope for the
-			// archive's `synthesis_text` column (human-readable). Fall
-			// back to the raw message text only for legacy runs that
-			// didn't ship the envelope.
-			const synthesisText =
-				payload?.type === 'text'
-					? payload.body
-					: (synthesis?.text ?? null);
-			const body = {
-				namespace: this.namespace,
-				sessionId: this.sessionId,
-				query: this.query,
-				synthesisText,
-				trace: {
-					agents: Array.from(this.agents.values()),
-					threads: Array.from(this.threads.values()).map((t) => ({
-						id: t.id,
-						name: t.name,
-						participants: t.participants,
-						messages: t.messages,
-						state: t.state,
-						timestamp: t.timestamp
-					}))
-				},
-				startedAt: this.startedAt
-			};
-			const res = await fetch('/api/fleet/archive', {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify(body)
-			});
-			if (!res.ok) {
-				const txt = await res.text().catch(() => '');
-				console.warn('[session] archive failed:', res.status, txt);
-				return;
-			}
-			this.archived = true;
-		} catch (err) {
-			console.warn('[session] archive error:', err);
-		} finally {
-			this.archiving = false;
-		}
 	}
 
 	/**
@@ -532,19 +480,10 @@ export class Session {
 						unread: t.unread + 1
 					});
 				}
-				// Orchestrator + no mentions = the final synthesis. Fire the
-				// archive call once (runs whichever branch above took). The
-				// endpoint is idempotent on session_id, so we don't strictly
-				// need to gate on `archived`, but skipping the redundant
-				// request is free.
-				if (
-					incoming.senderName === 'research-orchestrator' &&
-					incoming.mentionNames.length === 0 &&
-					!this.archived &&
-					!this.archiving
-				) {
-					void this.archiveRun();
-				}
+				// Synthesis archiving is now owned by the fleet-gateway
+				// server-side (it detects the orchestrator's no-mention message
+				// in the same stream and archives canonical /extended state,
+				// independent of this tab). The client no longer archives.
 				break;
 			}
 			case 'thread_closed': {
@@ -570,6 +509,10 @@ export class Session {
 					...t,
 					participants: t.participants.filter((p) => p !== data.name)
 				});
+				break;
+			}
+			case 'gateway_run_failed': {
+				this.failed = { reason: data.reason };
 				break;
 			}
 		}

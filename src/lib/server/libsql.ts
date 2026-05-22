@@ -49,6 +49,9 @@ export type ArchivedFleetRun = {
 	messageCount: number;
 	createdAt: number;
 	completedAt: number;
+	/** Per-agent LLM token usage (parsed from the model_usage JSON column).
+	 *  Null for runs archived before cost telemetry, or non-chat dev runs. */
+	modelUsage: unknown | null;
 };
 
 export type ArchiveInput = {
@@ -60,6 +63,8 @@ export type ArchiveInput = {
 	traceJson: string;
 	messageCount: number;
 	createdAt: number;
+	/** Cost telemetry object (gateway's buildModelUsage output) or null. */
+	modelUsage?: unknown;
 };
 
 /**
@@ -78,8 +83,8 @@ export async function archiveFleetRun(input: ArchiveInput): Promise<ArchivedFlee
 	await c.execute({
 		sql: `INSERT OR IGNORE INTO fleet_runs_archive
 		      (id, user_id, namespace, session_id, query, synthesis_text,
-		       trace_json, message_count, created_at, completed_at)
-		      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		       trace_json, message_count, created_at, completed_at, model_usage)
+		      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		args: [
 			id,
 			input.userId,
@@ -90,7 +95,8 @@ export async function archiveFleetRun(input: ArchiveInput): Promise<ArchivedFlee
 			input.traceJson,
 			input.messageCount,
 			input.createdAt,
-			completedAt
+			completedAt,
+			input.modelUsage != null ? JSON.stringify(input.modelUsage) : null
 		]
 	});
 
@@ -111,7 +117,7 @@ export async function getFleetRunBySessionId(
 	const c = getClient();
 	const res = await c.execute({
 		sql: `SELECT id, user_id, namespace, session_id, query, synthesis_text,
-		             trace_json, message_count, created_at, completed_at
+		             trace_json, message_count, created_at, completed_at, model_usage
 		      FROM fleet_runs_archive
 		      WHERE session_id = ? AND user_id = ?
 		      LIMIT 1`,
@@ -135,7 +141,7 @@ export async function listFleetRunsForUser(
 	const c = getClient();
 	const res = await c.execute({
 		sql: `SELECT id, user_id, namespace, session_id, query, synthesis_text,
-		             trace_json, message_count, created_at, completed_at
+		             trace_json, message_count, created_at, completed_at, model_usage
 		      FROM fleet_runs_archive
 		      WHERE user_id = ?
 		      ORDER BY completed_at DESC
@@ -157,6 +163,16 @@ function rowToArchivedFleetRun(row: Record<string, unknown>): ArchivedFleetRun {
 		traceJson: row.trace_json as string,
 		messageCount: Number(row.message_count),
 		createdAt: Number(row.created_at),
-		completedAt: Number(row.completed_at)
+		completedAt: Number(row.completed_at),
+		modelUsage: parseModelUsage(row.model_usage)
 	};
+}
+
+function parseModelUsage(raw: unknown): unknown | null {
+	if (typeof raw !== 'string' || raw.length === 0) return null;
+	try {
+		return JSON.parse(raw);
+	} catch {
+		return null;
+	}
 }

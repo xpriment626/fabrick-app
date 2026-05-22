@@ -16,7 +16,8 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { createSession, sessionEventsWsUrl } from '$lib/server/coral';
+import { createSession } from '$lib/server/coral';
+import { mintGatewayToken, gatewayEventsWsUrl } from '$lib/server/fleet-gateway';
 import { buildOrchestratorSessionRequest } from '$lib/server/session-request';
 import { resolveSlug } from '$lib/server/db/chats';
 import { supabaseAdmin } from '$lib/server/supabase';
@@ -74,13 +75,24 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			}
 		}
 
+		// Browser connects to the fleet-gateway (not coral-server directly):
+		// mint a short-lived, session-scoped JWT and hand back a gateway URL
+		// carrying it. The shared Coral token stays server-side in the gateway.
+		const gatewayToken = await mintGatewayToken({
+			userId: locals.user.id,
+			namespace,
+			sessionId,
+			query
+		});
+		const eventsWsUrl = gatewayEventsWsUrl(namespace, sessionId, gatewayToken);
+
 		const redirectTo = `/research/${encodeURIComponent(namespace)}/${encodeURIComponent(
 			sessionId
 		)}?q=${encodeURIComponent(query)}`;
 		return json({
 			namespace,
 			sessionId,
-			eventsWsUrl: sessionEventsWsUrl(namespace, sessionId),
+			eventsWsUrl,
 			redirectTo
 		});
 	} catch (err) {

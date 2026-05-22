@@ -8,7 +8,8 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { createSession, sessionEventsWsUrl } from '$lib/server/coral';
+import { createSession } from '$lib/server/coral';
+import { mintGatewayToken, gatewayEventsWsUrl } from '$lib/server/fleet-gateway';
 import { buildOrchestratorSessionRequest } from '$lib/server/session-request';
 
 export const POST: RequestHandler = async ({ request }) => {
@@ -31,10 +32,18 @@ export const POST: RequestHandler = async ({ request }) => {
 
 	try {
 		const { namespace, sessionId } = await createSession(sessionRequest);
+		// Route the dev harness through the gateway too (no direct-to-Coral
+		// anywhere). Dev runs aren't user-owned, so mint with a fixed subject.
+		const token = await mintGatewayToken({
+			userId: 'dev-harness',
+			namespace,
+			sessionId,
+			query: body.query.trim()
+		});
 		return json({
 			namespace,
 			sessionId,
-			eventsWsUrl: sessionEventsWsUrl(namespace, sessionId)
+			eventsWsUrl: gatewayEventsWsUrl(namespace, sessionId, token)
 		});
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);

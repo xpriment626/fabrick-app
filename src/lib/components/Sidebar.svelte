@@ -121,6 +121,7 @@
 	);
 
 	const onResearch = $derived(page.url.pathname === '/');
+	const onArchives = $derived(page.url.pathname === '/archives');
 	const onWallet = $derived(page.url.pathname === '/wallet');
 
 	let openMenuSlug = $state<string | null>(null);
@@ -261,6 +262,23 @@
 				<path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
 			</svg>
 			{#if expanded}<span class="nav-label">Research</span>{/if}
+		</a>
+		<a href="/archives" class="nav-item" class:active={onArchives} title="Fleet Archives">
+			<svg
+				width="16"
+				height="16"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+			>
+				<rect x="2" y="3" width="20" height="5" rx="1" />
+				<path d="M4 8v11a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V8" />
+				<path d="M10 12h4" />
+			</svg>
+			{#if expanded}<span class="nav-label">Fleet Archives</span>{/if}
 		</a>
 		<a href="/wallet" class="nav-item" class:active={onWallet} title="Wallet">
 			<svg

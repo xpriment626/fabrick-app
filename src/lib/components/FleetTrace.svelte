@@ -83,6 +83,7 @@
 	const finalSynthesis = $derived(session.finalSynthesis);
 	const synthesisPayload = $derived(session.synthesisPayload);
 	const agentsList = $derived(Array.from(session.agents.values()));
+	const failed = $derived(session.failed);
 
 	/** Best-effort body text for a trace message — unwraps the synthesis
 	 *  envelope when present so the raw JSON doesn't render in the trace
@@ -149,6 +150,15 @@
 			{data.query || 'Research session'}
 		</h1>
 	</header>
+
+	{#if failed}
+		<div class="mb-6 rounded-lg border border-[#dc2626]/35 bg-[#dc2626]/10 p-4" role="alert">
+			<div class="text-[15px] text-[#991b1b]">
+				<strong class="font-semibold">Fleet run failed.</strong>
+				{failed.reason}
+			</div>
+		</div>
+	{/if}
 
 	<!-- Agent status row -->
 	<section class="mb-6">

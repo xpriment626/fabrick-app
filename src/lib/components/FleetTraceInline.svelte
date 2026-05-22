@@ -84,6 +84,7 @@
 	const finalSynthesis = $derived(session.finalSynthesis);
 	const synthesisPayload = $derived(session.synthesisPayload);
 	const agentsList = $derived(Array.from(session.agents.values()));
+	const failed = $derived(session.failed);
 
 	// Elapsed-time ticker. Drives "Agents thinking · Xs". Both the live
 	// and completed durations are measured purely client-side (against
@@ -133,11 +134,13 @@
 	}
 
 	const labelText = $derived(
-		finalSynthesis
-			? `Fleet completed · ${fmtElapsed(elapsedMs)}`
-			: session.connected || mode === 'archived'
-				? `Agents thinking · ${fmtElapsed(elapsedMs)}`
-				: 'Connecting to fleet…'
+		failed
+			? 'Fleet run failed'
+			: finalSynthesis
+				? `Fleet completed · ${fmtElapsed(elapsedMs)}`
+				: session.connected || mode === 'archived'
+					? `Agents thinking · ${fmtElapsed(elapsedMs)}`
+					: 'Connecting to fleet…'
 	);
 
 	// Expanded by default while running so the user sees activity. Auto-
@@ -229,7 +232,7 @@
 	<button
 		type="button"
 		class="header"
-		class:running={!finalSynthesis && mode === 'live'}
+		class:running={!finalSynthesis && !failed && mode === 'live'}
 		onclick={onToggle}
 		aria-expanded={expanded}
 	>
@@ -259,6 +262,13 @@
 			<path d="m6 9 6 6 6-6" />
 		</svg>
 	</button>
+
+	{#if failed}
+		<div class="fail-banner" role="alert">
+			<strong>Fleet run failed.</strong>
+			<span>{failed.reason}</span>
+		</div>
+	{/if}
 
 	{#if expanded}
 		<div class="body">
@@ -332,6 +342,22 @@
 {/if}
 
 <style>
+	.fail-banner {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		align-items: baseline;
+		padding: 0.625rem 0.875rem;
+		margin: 0.5rem 0.75rem 0;
+		border: 1px solid color-mix(in srgb, #dc2626 35%, var(--color-border));
+		background: color-mix(in srgb, #dc2626 8%, var(--color-surface));
+		border-radius: 8px;
+		font-size: 13px;
+		color: #991b1b;
+	}
+	.fail-banner strong {
+		font-weight: 600;
+	}
 	.fleet-inline {
 		border: 1px solid var(--color-border);
 		background: color-mix(in srgb, var(--color-ink) 1.5%, var(--color-surface));
