@@ -153,6 +153,22 @@ function buildModelUsage(usage: Map<string, AgentUsage>): {
 	};
 }
 
+type RelayThread = { id: string; name?: string; participants: string[]; messages: unknown[] };
+
+/** Unwrap the fabrick synthesis envelope to its human-readable body, falling
+ *  back to the raw text for non-enveloped messages. */
+function unwrapSynthesis(text: string): string {
+	if (!text || text[0] !== '{') return text;
+	try {
+		const parsed = JSON.parse(text) as { __fabrick_synthesis__?: { type?: string; body?: unknown } };
+		const inner = parsed.__fabrick_synthesis__;
+		if (inner?.type === 'text' && typeof inner.body === 'string') return inner.body;
+	} catch {
+		/* not JSON */
+	}
+	return text;
+}
+
 /** Fire the server-side archive by calling back into the SvelteKit app with
  *  the shared service secret. Fire-and-forget — failures are logged, never
  *  thrown. No-op (with a warning) when the secret isn't configured. */
@@ -164,6 +180,7 @@ async function triggerArchive(
 		query: string;
 		synthesisText: string;
 		modelUsage: ReturnType<typeof buildModelUsage>;
+		threads: RelayThread[];
 	},
 	tag: string
 ): Promise<void> {
@@ -246,6 +263,9 @@ function attachRelay(
 	// Per-agent LLM usage, accumulated from llm_proxy_call events as they flow
 	// through, then shipped with the archive trigger as cost telemetry.
 	const usage = new Map<string, AgentUsage>();
+	// Thread + message accumulation from the stream — coral /extended omits
+	// thread messages, so the gateway is the source of the archived trace.
+	const threads = new Map<string, RelayThread>();
 	console.log(`${tag} open`);
 
 	const cleanup = (): void => {
@@ -290,7 +310,15 @@ function attachRelay(
 			agentName?: unknown;
 			modelName?: unknown;
 			usage?: { inputTokens?: unknown; outputTokens?: unknown };
-			message?: { senderName?: unknown; mentionNames?: unknown[]; text?: unknown };
+			thread?: { id?: unknown; name?: unknown; participants?: unknown };
+			message?: {
+				id?: unknown;
+				threadId?: unknown;
+				senderName?: unknown;
+				mentionNames?: unknown[];
+				text?: unknown;
+				timestamp?: unknown;
+			};
 		};
 		try {
 			parsed = JSON.parse(frame);
@@ -319,6 +347,38 @@ function attachRelay(
 			return;
 		}
 
+		// Accumulate thread metadata + messages so the archive captures the full
+		// trace (coral /extended omits thread messages).
+		if (parsed.type === 'thread_created' && parsed.thread && typeof parsed.thread.id === 'string') {
+			const id = parsed.thread.id;
+			const existing = threads.get(id);
+			threads.set(id, {
+				id,
+				name: typeof parsed.thread.name === 'string' ? parsed.thread.name : existing?.name,
+				participants: Array.isArray(parsed.thread.participants)
+					? (parsed.thread.participants as string[])
+					: (existing?.participants ?? []),
+				messages: existing?.messages ?? []
+			});
+		}
+		if (
+			parsed.type === 'thread_message_sent' &&
+			parsed.message &&
+			typeof parsed.message.threadId === 'string'
+		) {
+			const tid = parsed.message.threadId;
+			const t = threads.get(tid) ?? { id: tid, participants: [], messages: [] };
+			t.messages.push({
+				id: parsed.message.id,
+				threadId: tid,
+				senderName: parsed.message.senderName,
+				text: parsed.message.text,
+				timestamp: parsed.message.timestamp,
+				mentionNames: parsed.message.mentionNames ?? []
+			});
+			threads.set(tid, t);
+		}
+
 		// Synthesis = orchestrator message with no mentions. Archive once.
 		if (!settled && parsed.type === 'thread_message_sent' && parsed.message) {
 			const m = parsed.message;
@@ -328,9 +388,17 @@ function attachRelay(
 				m.mentionNames.length === 0
 			) {
 				settled = true;
-				const synthesisText = typeof m.text === 'string' ? m.text : '';
+				const synthesisText = unwrapSynthesis(typeof m.text === 'string' ? m.text : '');
 				void triggerArchive(
-					{ namespace, sessionId, userId, query, synthesisText, modelUsage: buildModelUsage(usage) },
+					{
+						namespace,
+						sessionId,
+						userId,
+						query,
+						synthesisText,
+						modelUsage: buildModelUsage(usage),
+						threads: Array.from(threads.values())
+					},
 					tag
 				);
 				// Run is done — tear the upstream subscription down.

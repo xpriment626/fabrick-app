@@ -74,38 +74,49 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			throw error(400, 'service archive requires userId, namespace, sessionId');
 		}
 
-		let ext;
+		// Agents come from coral /extended (reliable). Thread MESSAGES come from
+		// the gateway, which accumulated them off the live stream — /extended
+		// omits thread messages, which is why the archived trace was empty before.
+		let agents: unknown[] = [];
 		try {
-			ext = await getExtendedSession(namespace, sessionId);
+			const ext = await getExtendedSession(namespace, sessionId);
+			agents = Array.isArray(ext.agents) ? ext.agents : [];
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			throw error(502, `canonical snapshot fetch failed: ${msg}`);
+			// Non-fatal: a missing snapshot just means an empty roster; the trace,
+			// cost, and synthesis still archive from the gateway payload.
+			console.warn(
+				`[fleet/archive] /extended agents fetch failed (continuing): ${
+					err instanceof Error ? err.message : String(err)
+				}`
+			);
 		}
 
-		const agents = Array.isArray(ext.agents) ? ext.agents : [];
-		const threads = (Array.isArray(ext.threads) ? ext.threads : []).map((t) => ({
-			id: t.id,
-			name: t.name,
-			participants: t.participants ?? [],
-			messages: (t.messages ?? []).map((m) => ({ ...m, timestamp: toEpochMs(m.timestamp) })),
-			state: t.state,
-			timestamp: t.timestamp
-		}));
+		const gwThreads = Array.isArray(body.threads) ? body.threads : [];
+		const threads = gwThreads.map((t) => {
+			const tt = t as {
+				id?: unknown;
+				name?: unknown;
+				participants?: unknown;
+				messages?: unknown[];
+			};
+			return {
+				id: tt.id,
+				name: tt.name,
+				participants: Array.isArray(tt.participants) ? tt.participants : [],
+				messages: (Array.isArray(tt.messages) ? tt.messages : []).map((m) => {
+					const mm = m as Record<string, unknown>;
+					return { ...mm, timestamp: toEpochMs(mm.timestamp) };
+				})
+			};
+		});
 
 		let messageCount = 0;
 		let earliest: number | null = null;
-		let lastSynthesis: { text?: string; timestamp: number } | null = null;
 		for (const t of threads) {
 			for (const m of t.messages) {
 				messageCount += 1;
-				if (earliest === null || m.timestamp < earliest) earliest = m.timestamp;
-				if (
-					m.senderName === 'research-orchestrator' &&
-					Array.isArray(m.mentionNames) &&
-					m.mentionNames.length === 0
-				) {
-					if (!lastSynthesis || m.timestamp >= lastSynthesis.timestamp) lastSynthesis = m;
-				}
+				const ts = (m as { timestamp?: number }).timestamp;
+				if (typeof ts === 'number' && (earliest === null || ts < earliest)) earliest = ts;
 			}
 		}
 
@@ -114,7 +125,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			namespace,
 			sessionId,
 			query,
-			synthesisText: synthesisTextIn ?? lastSynthesis?.text ?? null,
+			// Gateway sends the already-unwrapped synthesis body.
+			synthesisText: synthesisTextIn,
 			agents,
 			threads,
 			messageCount,
