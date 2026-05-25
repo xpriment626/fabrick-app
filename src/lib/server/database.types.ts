@@ -339,6 +339,7 @@ export type Database = {
         | "wallet"
         | "topic"
         | "freeform"
+        | "fleet_run"
       run_status: "queued" | "running" | "complete" | "failed" | "cancelled"
       turn_role:
         | "user"
@@ -481,6 +482,7 @@ export const Constants = {
         "wallet",
         "topic",
         "freeform",
+        "fleet_run",
       ],
       run_status: ["queued", "running", "complete", "failed", "cancelled"],
       turn_role: [

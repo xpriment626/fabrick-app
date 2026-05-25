@@ -27,6 +27,9 @@ export type ChatSummary = {
 	title: string | null;
 	createdAt: string;
 	updatedAt: string;
+	/** Anchor the chat hangs off — drives the per-surface sidebar split
+	 *  (§17): `fleet_run` chats group under "Fleet", the rest under "News". */
+	anchorType: AnchorType;
 };
 
 /**
@@ -280,7 +283,7 @@ export async function appendTurn(args: {
 export async function listChats(userId: string, limit = 30): Promise<ChatSummary[]> {
 	const res = await supabaseAdmin
 		.from('research_sessions')
-		.select('slug, title, created_at, updated_at')
+		.select('slug, title, created_at, updated_at, anchor_type')
 		.eq('user_id', userId)
 		.is('archived_at', null)
 		.order('updated_at', { ascending: false })
@@ -290,8 +293,50 @@ export async function listChats(userId: string, limit = 30): Promise<ChatSummary
 		slug: s.slug,
 		title: s.title,
 		createdAt: s.created_at,
-		updatedAt: s.updated_at
+		updatedAt: s.updated_at,
+		anchorType: s.anchor_type
 	}));
+}
+
+/**
+ * Per-run follow-up counts (§17). Returns a map of coral session_id →
+ * number of user follow-up messages in that run's anchored chat, for the
+ * caller's `fleet_run`-anchored chats. Used to badge run cards on /fleet.
+ * Empty map when the user has no run chats — one round-trip otherwise.
+ */
+export async function getFleetRunFollowupCounts(
+	userId: string
+): Promise<Record<string, number>> {
+	const sessionsRes = await supabaseAdmin
+		.from('research_sessions')
+		.select('id, anchor_value')
+		.eq('user_id', userId)
+		.eq('anchor_type', 'fleet_run')
+		.is('archived_at', null);
+	if (sessionsRes.error) throw new Error(`getFleetRunFollowupCounts: ${sessionsRes.error.message}`);
+
+	const sessions = sessionsRes.data ?? [];
+	if (sessions.length === 0) return {};
+
+	// id → coral session_id (anchor_value)
+	const idToSession = new Map<string, string>();
+	for (const s of sessions) {
+		if (s.anchor_value) idToSession.set(s.id, s.anchor_value);
+	}
+
+	const turnsRes = await supabaseAdmin
+		.from('research_turns')
+		.select('session_id')
+		.in('session_id', [...idToSession.keys()])
+		.eq('role', 'user');
+	if (turnsRes.error) throw new Error(`getFleetRunFollowupCounts: ${turnsRes.error.message}`);
+
+	const counts: Record<string, number> = {};
+	for (const t of turnsRes.data ?? []) {
+		const coralSid = idToSession.get(t.session_id);
+		if (coralSid) counts[coralSid] = (counts[coralSid] ?? 0) + 1;
+	}
+	return counts;
 }
 
 /**

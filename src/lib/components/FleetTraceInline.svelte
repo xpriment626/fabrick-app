@@ -46,6 +46,11 @@
 		initialThreads: SessionThread[];
 		mode: 'live' | 'archived';
 		startedAt: number;
+		/** Known completion instant (epoch ms). Pass for archived runs so the
+		 *  elapsed label reads the real run duration instead of (page-load −
+		 *  startedAt). Omitted for live runs — completion is captured when
+		 *  synthesis lands during this mount. */
+		completedAt?: number;
 	};
 
 	let {
@@ -56,7 +61,8 @@
 		initialAgents,
 		initialThreads,
 		mode,
-		startedAt
+		startedAt,
+		completedAt
 	}: Props = $props();
 
 	// Same Session machinery as FleetTrace.svelte. Capturing the props
@@ -92,7 +98,10 @@
 	// server's message clock — that avoids both clock-skew drift and the
 	// NaN we'd get if a message timestamp arrived unparseable.
 	let nowMs = $state(Date.now());
-	let completedAtMs = $state<number | null>(null);
+	// Seed from the known completion instant (archived runs) so the label is
+	// accurate on mount; otherwise null and captured when synthesis lands.
+	// svelte-ignore state_referenced_locally
+	let completedAtMs = $state<number | null>(completedAt ?? null);
 	let tickHandle: ReturnType<typeof setInterval> | null = null;
 
 	$effect(() => {

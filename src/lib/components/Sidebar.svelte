@@ -1,19 +1,20 @@
 <!--
-	Global left sidebar. Two states:
+	Global left sidebar (design.md §17 — fleet-first IA). Two states:
 
-	- Collapsed (~60px): icon-only rail. Brand mark, New chat, Search
-	  placeholder, Research feed link, Wallet link. User avatar at bottom.
-	- Expanded (~260px): wordmark + collapse toggle, New chat button,
-	  search input placeholder, Nav (Research / Wallet), History grouped
-	  by Today/Yesterday/Earlier, user profile at bottom.
+	- Collapsed (~60px): icon-only rail. Brand mark, Search placeholder,
+	  News / Fleet / Wallet links. User avatar at bottom.
+	- Expanded (~260px): wordmark + collapse toggle, search input
+	  placeholder, Nav (News / Fleet / Wallet), History grouped by
+	  Today/Yesterday/Earlier, user profile at bottom.
+
+	No generic "New chat" entry: there is no unanchored chat (§17). A
+	conversation starts by opening a News story or a Fleet run. Run history
+	lives on the Fleet page (composition tabs); the History list here is
+	anchored conversations.
 
 	State persists in localStorage so reloads remember. CSS variable
 	`--sidebar-w` is set on `<html>` from the script so other layout
-	regions (ambient bar, main content) can stay aligned without prop
-	drilling.
-
-	The chat history list reads from `recents` passed down by the root
-	layout's server load.
+	regions stay aligned without prop drilling.
 -->
 <script lang="ts">
 	import { goto, invalidateAll } from '$app/navigation';
@@ -25,7 +26,6 @@
 	let { recents }: Props = $props();
 
 	let expanded = $state(false);
-	let creating = $state(false);
 
 	// Reactive width var applied to <html> so CSS elsewhere can use
 	// var(--sidebar-w). Updated whenever `expanded` changes.
@@ -57,32 +57,9 @@
 		}
 	}
 
-	async function newChat() {
-		if (creating) return;
-		creating = true;
-		try {
-			const res = await fetch('/api/chat', {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: '{}'
-			});
-			if (!res.ok) throw new Error(`${res.status}`);
-			const { slug } = (await res.json()) as { slug: string };
-			await goto(`/chat/${slug}`);
-			// Layout-level recents won't re-run on a within-layout nav,
-			// so explicitly invalidate so the new chat appears in the
-			// sidebar without requiring a hard refresh.
-			void invalidateAll();
-		} catch (err) {
-			console.error('[Sidebar] new chat failed', err);
-		} finally {
-			creating = false;
-		}
-	}
-
-	/** Bucket recents by date for the History section. */
+	/** Bucket a chat list by date for a History section. */
 	type Bucket = { label: string; items: ChatSummary[] };
-	const buckets = $derived.by<Bucket[]>(() => {
+	function bucketByDate(items: ChatSummary[]): Bucket[] {
 		const now = Date.now();
 		const startOfDay = (d: Date) => {
 			const x = new Date(d);
@@ -98,7 +75,7 @@
 		const w: ChatSummary[] = [];
 		const e: ChatSummary[] = [];
 
-		for (const c of recents) {
+		for (const c of items) {
 			const ts = new Date(c.updatedAt).getTime();
 			if (ts >= today) t.push(c);
 			else if (ts >= yesterday) y.push(c);
@@ -112,7 +89,13 @@
 		if (w.length) out.push({ label: 'Earlier this week', items: w });
 		if (e.length) out.push({ label: 'Earlier', items: e });
 		return out;
-	});
+	}
+
+	// §17: split history per surface — Fleet (run-anchored follow-ups) vs
+	// News (story/everything else). Two sections, mirroring Cowork's Recents.
+	const newsBuckets = $derived(bucketByDate(recents.filter((c) => c.anchorType !== 'fleet_run')));
+	const fleetBuckets = $derived(bucketByDate(recents.filter((c) => c.anchorType === 'fleet_run')));
+	const hasAnyHistory = $derived(newsBuckets.length > 0 || fleetBuckets.length > 0);
 
 	const currentChatSlug = $derived(
 		page.url.pathname.startsWith('/chat/')
@@ -120,8 +103,8 @@
 			: undefined
 	);
 
-	const onResearch = $derived(page.url.pathname === '/');
-	const onArchives = $derived(page.url.pathname === '/archives');
+	const onNews = $derived(page.url.pathname === '/');
+	const onFleet = $derived(page.url.pathname === '/fleet');
 	const onWallet = $derived(page.url.pathname === '/wallet');
 
 	let openMenuSlug = $state<string | null>(null);
@@ -195,32 +178,9 @@
 		</button>
 	</div>
 
-	<!-- Action group: new chat, search -->
+	<!-- Action group: search (no generic "New chat" — §17: chat is anchored
+	     to a News story or a Fleet run, never started blank). -->
 	<div class="actions">
-		<button
-			type="button"
-			onclick={newChat}
-			disabled={creating}
-			class="action-btn"
-			title="New chat"
-			aria-label="New chat"
-		>
-			<svg
-				width="16"
-				height="16"
-				viewBox="0 0 24 24"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="2"
-				stroke-linecap="round"
-				stroke-linejoin="round"
-			>
-				<path d="M12 5v14" />
-				<path d="M5 12h14" />
-			</svg>
-			{#if expanded}<span class="action-label">New chat</span>{/if}
-		</button>
-
 		<button
 			type="button"
 			disabled
@@ -247,7 +207,7 @@
 
 	<!-- Primary nav -->
 	<nav class="nav" aria-label="Sections">
-		<a href="/" class="nav-item" class:active={onResearch} title="Research">
+		<a href="/" class="nav-item" class:active={onNews} title="News">
 			<svg
 				width="16"
 				height="16"
@@ -258,12 +218,12 @@
 				stroke-linecap="round"
 				stroke-linejoin="round"
 			>
-				<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-				<path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+				<path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2" />
+				<path d="M18 14h-8M15 18h-5M10 6h8v4h-8z" />
 			</svg>
-			{#if expanded}<span class="nav-label">Research</span>{/if}
+			{#if expanded}<span class="nav-label">News</span>{/if}
 		</a>
-		<a href="/archives" class="nav-item" class:active={onArchives} title="Fleet Archives">
+		<a href="/fleet" class="nav-item" class:active={onFleet} title="Fleet">
 			<svg
 				width="16"
 				height="16"
@@ -278,7 +238,7 @@
 				<path d="M4 8v11a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V8" />
 				<path d="M10 12h4" />
 			</svg>
-			{#if expanded}<span class="nav-label">Fleet Archives</span>{/if}
+			{#if expanded}<span class="nav-label">Fleet</span>{/if}
 		</a>
 		<a href="/wallet" class="nav-item" class:active={onWallet} title="Wallet">
 			<svg
@@ -298,14 +258,12 @@
 		</a>
 	</nav>
 
-	<!-- History (only when expanded) -->
-	{#if expanded}
-		<div class="history">
-			<div class="history-heading">History</div>
-			{#if buckets.length === 0}
-				<div class="history-empty">No chats yet.</div>
-			{:else}
-				{#each buckets as bucket (bucket.label)}
+	<!-- History (only when expanded). §17: two surfaces — News + Fleet. -->
+	{#snippet historySection(heading: string, sectionBuckets: Bucket[])}
+		{#if sectionBuckets.length > 0}
+			<div class="history-section">
+				<div class="history-heading">{heading}</div>
+				{#each sectionBuckets as bucket (bucket.label)}
 					<div class="history-bucket">
 						<div class="history-bucket-label">{bucket.label}</div>
 						<ul class="history-list">
@@ -318,9 +276,9 @@
 									<a
 										href="/chat/{chat.slug}"
 										class="history-link"
-										title={chat.title || 'New chat'}
+										title={chat.title || 'Untitled'}
 									>
-										{chat.title || 'New chat'}
+										{chat.title || 'Untitled'}
 									</a>
 									<div class="history-menu-wrap" data-menu-for={chat.slug}>
 										<button
@@ -362,6 +320,18 @@
 						</ul>
 					</div>
 				{/each}
+			</div>
+		{/if}
+	{/snippet}
+
+	{#if expanded}
+		<div class="history">
+			{#if !hasAnyHistory}
+				<div class="history-heading">History</div>
+				<div class="history-empty">No conversations yet.</div>
+			{:else}
+				{@render historySection('News', newsBuckets)}
+				{@render historySection('Fleet', fleetBuckets)}
 			{/if}
 		</div>
 	{/if}
@@ -516,6 +486,11 @@
 		display: flex;
 		flex-direction: column;
 		gap: 14px;
+	}
+	.history-section {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
 	}
 	.history-heading {
 		font-size: 11px;

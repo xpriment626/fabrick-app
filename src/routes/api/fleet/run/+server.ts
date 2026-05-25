@@ -19,6 +19,7 @@ import type { RequestHandler } from './$types';
 import { createSession } from '$lib/server/coral';
 import { mintGatewayToken, gatewayEventsWsUrl } from '$lib/server/fleet-gateway';
 import { buildOrchestratorSessionRequest } from '$lib/server/session-request';
+import { readWorkingMemory } from '$lib/server/working-memory';
 import { resolveSlug } from '$lib/server/db/chats';
 import { supabaseAdmin } from '$lib/server/supabase';
 
@@ -46,10 +47,23 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	// back here keeps a typo in the client from killing the dispatch.
 	const mode = typeof body.mode === 'string' && body.mode.trim() ? body.mode.trim() : 'research';
 
+	// Read the user's working memory (dream-pass synthesis) at dispatch and
+	// fold it into the orchestrator's INITIAL_QUERY. Best-effort: a memory
+	// read failure must not block the run.
+	const userId = locals.user.id;
+	const userMemory = await readWorkingMemory(userId).catch((err) => {
+		console.warn(
+			`[fleet/run] working-memory read failed for ${userId}:`,
+			err instanceof Error ? err.message : String(err)
+		);
+		return null;
+	});
+
 	const sessionRequest = buildOrchestratorSessionRequest({
 		sessionSlug: slug,
 		userQuery: query,
-		mode
+		mode,
+		userMemory: userMemory ?? undefined
 	});
 
 	try {

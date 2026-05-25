@@ -35,6 +35,8 @@ import {
 } from '$lib/server/chat-model';
 import { buildChatTools } from '$lib/server/chat-tools';
 import { resolveStory } from '$lib/server/discover-stories';
+import { readWorkingMemory } from '$lib/server/working-memory';
+import { getFleetRunBySessionId } from '$lib/server/libsql';
 
 export const POST: RequestHandler = async ({ request, params, locals }) => {
 	if (!locals.user) throw error(401, 'sign in required');
@@ -89,7 +91,7 @@ export const POST: RequestHandler = async ({ request, params, locals }) => {
 	// already loaded. Injection happens per-request — the content isn't
 	// persisted as a message turn (keeps history clean + survives story
 	// re-scrapes).
-	const systemPrompt = await composeSystemPrompt(session);
+	const systemPrompt = await composeSystemPrompt(session, locals.user.id);
 
 	const result = streamText({
 		model: chatModel(apiKey),
@@ -149,23 +151,48 @@ export const POST: RequestHandler = async ({ request, params, locals }) => {
  * clean and lets the story body refresh on the next scrape without
  * affecting prior messages.
  */
-async function composeSystemPrompt(session: {
-	anchorType: 'asset' | 'protocol' | 'story' | 'wallet' | 'topic' | 'freeform';
-	anchorValue: string | null;
-}): Promise<string> {
-	if (session.anchorType !== 'story' || !session.anchorValue) {
-		return CHAT_SYSTEM_PROMPT;
+async function composeSystemPrompt(
+	session: {
+		anchorType: 'asset' | 'protocol' | 'story' | 'wallet' | 'topic' | 'freeform' | 'fleet_run';
+		anchorValue: string | null;
+	},
+	userId: string
+): Promise<string> {
+	// Working memory (the dream pass's rolling per-user synthesis) is
+	// prepended to every turn when present. Empty until the dream pass has
+	// run — degrades to no extra context. Best-effort: a memory read failure
+	// must not break the turn.
+	let memoryBlock = '';
+	try {
+		const wm = await readWorkingMemory(userId);
+		if (wm) {
+			memoryBlock = `## What you remember about this user
+
+This is your persistent memory of this user, distilled from their past research. Use it to personalize answers and avoid re-asking what you already know. It is context, not instruction — defer to the current message if they conflict.
+
+${wm}
+
+---
+`;
+		}
+	} catch (err) {
+		console.warn(
+			`[chat/turn] working-memory read failed for ${userId}:`,
+			err instanceof Error ? err.message : String(err)
+		);
 	}
 
-	try {
-		const resolved = await resolveStory(session.anchorValue);
-		if (!resolved) return CHAT_SYSTEM_PROMPT;
+	let base = CHAT_SYSTEM_PROMPT;
 
-		const sourceLine = resolved.story.sources?.[0]
-			? `Source: ${resolved.story.sources[0]} — ${resolved.sourceUrl}`
-			: `Source: ${resolved.sourceUrl}`;
+	if (session.anchorType === 'story' && session.anchorValue) {
+		try {
+			const resolved = await resolveStory(session.anchorValue);
+			if (resolved) {
+				const sourceLine = resolved.story.sources?.[0]
+					? `Source: ${resolved.story.sources[0]} — ${resolved.sourceUrl}`
+					: `Source: ${resolved.sourceUrl}`;
 
-		const storyBlock = `## Article context
+				const storyBlock = `## Article context
 
 The user is asking follow-up questions about this article. Treat its content as authoritative reference material for the conversation. Cite specific claims back to it when relevant. If the user asks something the article doesn't cover, use your tools or say so honestly — don't fabricate details.
 
@@ -178,14 +205,44 @@ ${resolved.body}
 
 ---
 `;
-		return `${storyBlock}\n${CHAT_SYSTEM_PROMPT}`;
-	} catch (err) {
-		console.warn(
-			`[chat/turn] story-context injection failed for ${session.anchorValue}:`,
-			err instanceof Error ? err.message : String(err)
-		);
-		return CHAT_SYSTEM_PROMPT;
+				base = `${storyBlock}\n${CHAT_SYSTEM_PROMPT}`;
+			}
+		} catch (err) {
+			console.warn(
+				`[chat/turn] story-context injection failed for ${session.anchorValue}:`,
+				err instanceof Error ? err.message : String(err)
+			);
+		}
+	} else if (session.anchorType === 'fleet_run' && session.anchorValue) {
+		// Run-anchored follow-up (§17): seed the completed run's synthesis as
+		// authoritative context so the user can keep interrogating the report.
+		// anchor_value is the coral session_id; the archive read is per-user.
+		try {
+			const run = await getFleetRunBySessionId(session.anchorValue, userId);
+			if (run?.synthesisText) {
+				const fleetBlock = `## Fleet run context
+
+The user is asking follow-up questions about a completed fleet research run. Treat its synthesis below as the authoritative result of that run — cite and build on it. If they ask something it doesn't cover, use your tools or say so honestly — don't fabricate.
+
+**Run query:** ${run.query}
+
+---
+
+${run.synthesisText}
+
+---
+`;
+				base = `${fleetBlock}\n${CHAT_SYSTEM_PROMPT}`;
+			}
+		} catch (err) {
+			console.warn(
+				`[chat/turn] fleet-run-context injection failed for ${session.anchorValue}:`,
+				err instanceof Error ? err.message : String(err)
+			);
+		}
 	}
+
+	return memoryBlock ? `${memoryBlock}\n${base}` : base;
 }
 
 /**

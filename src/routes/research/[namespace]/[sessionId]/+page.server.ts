@@ -17,6 +17,8 @@ import type { PageServerLoad } from './$types';
 import { getExtendedSession } from '$lib/server/coral';
 import { mintGatewayToken, gatewayEventsWsUrl } from '$lib/server/fleet-gateway';
 import { getFleetRunBySessionId } from '$lib/server/libsql';
+import { findChatByAnchor, loadChat } from '$lib/server/db/chats';
+import { listMemoryItems } from '$lib/server/fleet-memory';
 import { supabaseAdmin } from '$lib/server/supabase';
 
 export const load: PageServerLoad = async ({ params, url, locals }) => {
@@ -36,6 +38,23 @@ export const load: PageServerLoad = async ({ params, url, locals }) => {
 				trace = {};
 			}
 			if (Array.isArray(trace.agents) && Array.isArray(trace.threads)) {
+				// Run-anchored follow-up chat (§17): only completed runs carry
+				// one, so we hydrate it here in the archived branch. Reused
+				// across visits via findChatByAnchor on (fleet_run, sessionId).
+				const anchored = await findChatByAnchor({
+					userId: locals.user.id,
+					anchorType: 'fleet_run',
+					anchorValue: sessionId
+				}).catch(() => null);
+				const loaded = anchored ? await loadChat(anchored.slug).catch(() => null) : null;
+
+				// Dream inspector (§17 B.5): the raw atoms this run's dream pass
+				// extracted, salience-ordered. Nested in the run page, not on cards.
+				const dreamAtoms = await listMemoryItems(locals.user.id, {
+					sourceRunId: archived.id,
+					kind: 'dream_item'
+				}).catch(() => []);
+
 				return {
 					namespace,
 					sessionId,
@@ -44,7 +63,16 @@ export const load: PageServerLoad = async ({ params, url, locals }) => {
 					initialAgents: trace.agents,
 					initialThreads: trace.threads,
 					mode: 'archived' as const,
-					archivedAt: archived.completedAt
+					archivedAt: archived.completedAt,
+					startedAt: archived.createdAt,
+					synthesisText: archived.synthesisText,
+					chat: loaded ? { slug: loaded.slug, turns: loaded.turns } : null,
+					dreamAtoms: dreamAtoms.map((a) => ({
+						id: a.id,
+						content: a.content,
+						salience: a.salience,
+						topicId: a.topicId
+					}))
 				};
 			}
 		}
@@ -92,7 +120,15 @@ export const load: PageServerLoad = async ({ params, url, locals }) => {
 			initialAgents: snapshot.agents,
 			initialThreads: snapshot.threads,
 			mode: 'live' as const,
-			archivedAt: null
+			archivedAt: null,
+			// Best-available dispatch instant for the elapsed ticker. A live run
+			// reached here was just dispatched, so load-time ≈ start.
+			startedAt: Date.now(),
+			// Follow-up chat only attaches to completed runs (§17) — a live
+			// run has no synthesis to discuss yet.
+			synthesisText: null,
+			chat: null,
+			dreamAtoms: [] as { id: string; content: string; salience: number | null; topicId: string | null }[]
 		};
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);

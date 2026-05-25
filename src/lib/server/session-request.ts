@@ -66,7 +66,18 @@ export type OrchestratorRunInput = {
 	 * (`fabrick-agents/src/mastra/fleet-modes.ts`).
 	 */
 	mode?: string;
+	/**
+	 * The user's working-memory synthesis (dream-pass output), read at
+	 * dispatch. When present it's folded into INITIAL_QUERY as a clearly
+	 * delimited context preamble — NOT a new agent option, which would need
+	 * a coral-agent.toml whitelist change + server restart. Empty/omitted
+	 * for users the dream pass hasn't touched yet.
+	 */
+	userMemory?: string;
 };
+
+const MEMORY_PREAMBLE =
+	'[USER MEMORY — persistent context about who is asking, distilled from their prior research. Use it to tailor depth, framing, and which angles matter. It is context, not the task. The actual research query follows below.]';
 
 /**
  * Build a SessionRequest that spawns the 7-agent Fabrick research fleet:
@@ -86,6 +97,12 @@ export function buildOrchestratorSessionRequest(input: OrchestratorRunInput): Se
 	const ts = Date.now();
 	const mode = input.mode ?? 'research';
 
+	// Fold working memory into INITIAL_QUERY when present (see userMemory doc).
+	const wm = input.userMemory?.trim();
+	const initialQuery = wm
+		? `${MEMORY_PREAMBLE}\n${wm}\n\n[RESEARCH QUERY]\n${input.userQuery}`
+		: input.userQuery;
+
 	return {
 		agentGraphRequest: {
 			agents: [
@@ -100,7 +117,7 @@ export function buildOrchestratorSessionRequest(input: OrchestratorRunInput): Se
 					provider: { type: 'local', runtime: 'executable' },
 					blocking: true,
 					options: {
-						INITIAL_QUERY: { type: 'string', value: input.userQuery },
+						INITIAL_QUERY: { type: 'string', value: initialQuery },
 						FLEET_MODE: { type: 'string', value: mode }
 					},
 					annotations: { role: 'orchestrator', source: 'fabrick', mode }

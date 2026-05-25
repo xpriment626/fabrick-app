@@ -1,21 +1,15 @@
 <script lang="ts">
 	import '../app.css';
-	import { page } from '$app/state';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import ConnectWalletButton from '$lib/components/ConnectWalletButton.svelte';
-	import AmbientChatBar from '$lib/components/AmbientChatBar.svelte';
 	import type { LayoutData } from './$types';
 
 	type Props = { data: LayoutData; children: import('svelte').Snippet };
 	let { data, children }: Props = $props();
 
-	// Ambient bar is hidden on routes that ship their own compose:
-	// /chat/[slug] (regular chat) and /discover/[slug] (story-scoped
-	// follow-up composer). Elsewhere the ambient bar is the primary
-	// entry into a new chat.
-	const showAmbient = $derived(
-		!page.url.pathname.startsWith('/chat/') && !page.url.pathname.startsWith('/discover/')
-	);
+	// §17: no global ambient chat bar. A conversation is anchored — it
+	// lives inside a News story (/discover/[slug]) or a Fleet run, each of
+	// which ships its own composer. There is no unanchored entry point.
 </script>
 
 <Sidebar recents={data.recents} />
@@ -25,10 +19,6 @@
 <div class="main">
 	{@render children()}
 </div>
-
-{#if showAmbient}
-	<AmbientChatBar />
-{/if}
 
 <style>
 	/* Reserve space for the sidebar. Width comes from --sidebar-w which

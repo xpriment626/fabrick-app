@@ -19,6 +19,7 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { archiveFleetRun } from '$lib/server/libsql';
+import { triggerDreamPass } from '$lib/server/dream-pass';
 import { getExtendedSession } from '$lib/server/coral';
 import { supabaseAdmin } from '$lib/server/supabase';
 import type { Json } from '$lib/server/database.types';
@@ -181,8 +182,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const modelUsage =
 		isService && body.modelUsage && typeof body.modelUsage === 'object' ? body.modelUsage : null;
 
+	// Composition/mode the run executed. v0 only ships 'research'; the body
+	// may carry `mode`/`templateId` from a future multi-mode dispatch.
+	const templateId =
+		(typeof body.mode === 'string' && body.mode.trim()) ||
+		(typeof body.templateId === 'string' && body.templateId.trim()) ||
+		'research';
+
 	try {
-		const row = await archiveFleetRun({
+		const { row, inserted } = await archiveFleetRun({
 			userId: resolved.userId,
 			namespace: resolved.namespace,
 			sessionId: resolved.sessionId,
@@ -191,8 +199,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			traceJson: JSON.stringify({ agents: resolved.agents, threads: resolved.threads }),
 			messageCount: resolved.messageCount,
 			createdAt: resolved.startedAt,
-			modelUsage
+			modelUsage,
+			templateId
 		});
+
+		// Run-triggered dream pass (§16): fire-and-forget, only on a fresh
+		// archive (not an idempotent re-archive from the browser/gateway race).
+		// Never blocks or fails the archive response.
+		if (inserted) {
+			triggerDreamPass(row);
+		}
 
 		// Flip the `research_runs` lifecycle to `complete` so the chat-side
 		// re-entry cards stop showing "in progress", and persist cost telemetry
