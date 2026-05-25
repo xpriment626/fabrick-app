@@ -38,7 +38,14 @@ import {
 import { newsGetArticlesInput, newsGetArticles } from '$lib/server/tools/coindesk';
 import { exaWebSearchInput, exaWebSearch } from '$lib/server/tools/exa';
 
-export function buildChatTools() {
+/** Context the chat turn passes in so tools can tailor their output. */
+export type ChatToolsContext = {
+	/** Set when the chat is anchored to a News story — threaded into the
+	 *  `suggest_fleet` chip so escalation seeds the story (§17 Phase C). */
+	storySlug?: string | null;
+};
+
+export function buildChatTools(ctx: ChatToolsContext = {}) {
 	return {
 		jupiter_get_prices: tool({
 			description:
@@ -120,7 +127,14 @@ export function buildChatTools() {
 						'One sentence on why this is fleet-shaped — which specialists matter and why diversity-of-priors helps.'
 					)
 			}),
-			execute: async (input) => ({ ack: true, query: input.query, reason: input.reason })
+			execute: async (input) => ({
+				ack: true,
+				query: input.query,
+				reason: input.reason,
+				// Carry the story anchor so the chip's dispatch can seed the run
+				// with the article context (§17 Phase C). Null for non-story chats.
+				storySlug: ctx.storySlug ?? null
+			})
 		})
 	};
 }

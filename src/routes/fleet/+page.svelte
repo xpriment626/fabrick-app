@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ModelUsageSummary from '$lib/components/ModelUsageSummary.svelte';
+	import NewRunComposer from '$lib/components/NewRunComposer.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: Props = $props();
@@ -53,6 +54,9 @@
 
 <div class="mx-auto w-full max-w-4xl px-6 py-10">
 	<h1 class="text-ink font-display mb-6 text-3xl font-bold tracking-tight">Fleet</h1>
+
+	<!-- New Run — the deliberate fleet-dispatch entry point (§17 Phase C). -->
+	<NewRunComposer />
 
 	<!-- Composition tabs (§16): one per fleet template present. Data-driven —
 	     new modes appear automatically. -->

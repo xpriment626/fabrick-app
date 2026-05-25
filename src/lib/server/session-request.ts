@@ -74,10 +74,20 @@ export type OrchestratorRunInput = {
 	 * for users the dream pass hasn't touched yet.
 	 */
 	userMemory?: string;
+	/**
+	 * Story context, when this run was escalated from a News story chat
+	 * (§17 Phase C). Folded into INITIAL_QUERY as the authoritative article
+	 * the run is grounded in — the structured story→fleet seed. Caller
+	 * (`/api/fleet/run`) composes this from the resolved story.
+	 */
+	storyContext?: string;
 };
 
 const MEMORY_PREAMBLE =
 	'[USER MEMORY — persistent context about who is asking, distilled from their prior research. Use it to tailor depth, framing, and which angles matter. It is context, not the task. The actual research query follows below.]';
+
+const STORY_PREAMBLE =
+	'[STORY CONTEXT — this run was launched from a news story. Treat the article below as the grounding subject of the research: verify, deepen, and contextualize it. The actual research query follows below.]';
 
 /**
  * Build a SessionRequest that spawns the 7-agent Fabrick research fleet:
@@ -97,10 +107,16 @@ export function buildOrchestratorSessionRequest(input: OrchestratorRunInput): Se
 	const ts = Date.now();
 	const mode = input.mode ?? 'research';
 
-	// Fold working memory into INITIAL_QUERY when present (see userMemory doc).
+	// Compose INITIAL_QUERY: optional context preambles (story grounding,
+	// then user memory) ahead of the actual query. Order puts the subject
+	// (story) first, then who's asking (memory), then the task.
+	const blocks: string[] = [];
+	const story = input.storyContext?.trim();
+	if (story) blocks.push(`${STORY_PREAMBLE}\n${story}`);
 	const wm = input.userMemory?.trim();
-	const initialQuery = wm
-		? `${MEMORY_PREAMBLE}\n${wm}\n\n[RESEARCH QUERY]\n${input.userQuery}`
+	if (wm) blocks.push(`${MEMORY_PREAMBLE}\n${wm}`);
+	const initialQuery = blocks.length
+		? `${blocks.join('\n\n')}\n\n[RESEARCH QUERY]\n${input.userQuery}`
 		: input.userQuery;
 
 	return {

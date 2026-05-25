@@ -21,16 +21,21 @@ import { mintGatewayToken, gatewayEventsWsUrl } from '$lib/server/fleet-gateway'
 import { buildOrchestratorSessionRequest } from '$lib/server/session-request';
 import { readWorkingMemory } from '$lib/server/working-memory';
 import { resolveSlug } from '$lib/server/db/chats';
+import { resolveStory } from '$lib/server/discover-stories';
 import { supabaseAdmin } from '$lib/server/supabase';
+
+/** Max story body chars folded into INITIAL_QUERY — keeps the dispatch
+ *  payload bounded while giving the orchestrator the article to ground on. */
+const MAX_STORY_BODY_CHARS = 4000;
 
 export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) throw error(401, 'sign in required');
 
-	let body: { query?: unknown; slug?: unknown; mode?: unknown } = {};
+	let body: { query?: unknown; slug?: unknown; mode?: unknown; storySlug?: unknown } = {};
 	try {
 		body = await request.json();
 	} catch {
-		throw error(400, 'expected JSON body { query: string, slug?: string, mode?: string }');
+		throw error(400, 'expected JSON body { query: string, slug?, mode?, storySlug? }');
 	}
 
 	const query = typeof body.query === 'string' ? body.query.trim() : '';
@@ -59,12 +64,42 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		return null;
 	});
 
+	// Structured story→fleet seed (§17 Phase C): when escalated from a News
+	// story chat, ground the run in that article. Best-effort — a bad/missing
+	// slug just dispatches without story context.
+	const storySlug = typeof body.storySlug === 'string' ? body.storySlug.trim() : '';
+	let storyContext: string | undefined;
+	if (storySlug) {
+		try {
+			const resolved = await resolveStory(storySlug);
+			if (resolved) {
+				const source = resolved.story.sources?.[0] ?? 'source';
+				storyContext = [
+					`**${resolved.story.headline}**`,
+					`Source: ${source} — ${resolved.sourceUrl}`,
+					'',
+					resolved.body.slice(0, MAX_STORY_BODY_CHARS)
+				].join('\n');
+			}
+		} catch (err) {
+			console.warn(
+				`[fleet/run] story seed failed for ${storySlug}:`,
+				err instanceof Error ? err.message : String(err)
+			);
+		}
+	}
+
 	const sessionRequest = buildOrchestratorSessionRequest({
 		sessionSlug: slug,
 		userQuery: query,
 		mode,
-		userMemory: userMemory ?? undefined
+		userMemory: userMemory ?? undefined,
+		storyContext
 	});
+
+	console.log(
+		`[fleet/run] dispatch mode=${mode} story=${storyContext ? 'yes' : 'no'} memory=${userMemory ? 'yes' : 'no'}`
+	);
 
 	try {
 		const { namespace, sessionId } = await createSession(sessionRequest);

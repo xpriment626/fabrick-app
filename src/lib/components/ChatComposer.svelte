@@ -1,6 +1,7 @@
 <!--
-	Shared chat compose primitive — used by AmbientChatBar (home), the
-	chat page, and the discover-story page.
+	Shared chat compose primitive — used by the chat page, the
+	discover-story follow-up, and the fleet-run follow-up. (§17 removed the
+	global ambient bar; all composers are now anchored/embedded.)
 
 	Layout follows Claude's chat compose 1:1:
 	  ┌──────────────────────────────────────┐
@@ -19,8 +20,8 @@
 	connector + skills surfaces.
 
 	Variant:
-	  - `ambient`  — translucent glass pill, used by the floating
-	                 AmbientChatBar
+	  - `ambient`  — translucent glass pill (currently unused; kept for a
+	                 future floating composer)
 	  - `embedded` — solid surface, used inside-page composers
 -->
 <script lang="ts">

@@ -23,9 +23,10 @@ export const load: PageServerLoad = async ({ params, url, locals }) => {
 	return {
 		chat,
 		fleetRuns,
-		// If `?autosend=1`, the client knows the last user turn is fresh
-		// and needs to be sent to the model. Set by AmbientChatBar after
-		// creating a new chat with a seeded first message.
+		// If `?autosend=1`, the client knows the last user turn is fresh and
+		// needs to be sent to the model. Legacy flag (the ambient new-chat
+		// flow that set it was removed in §17); nothing sets it today, but the
+		// handling is harmless + defensive for any seeded-first-turn caller.
 		autosend: url.searchParams.get('autosend') === '1'
 	};
 };

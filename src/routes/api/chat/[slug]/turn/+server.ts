@@ -97,7 +97,9 @@ export const POST: RequestHandler = async ({ request, params, locals }) => {
 		model: chatModel(apiKey),
 		system: systemPrompt,
 		messages: await convertToModelMessages(uiHistory),
-		tools: buildChatTools(),
+		tools: buildChatTools({
+			storySlug: session.anchorType === 'story' ? session.anchorValue : null
+		}),
 		// Hard cap: 5 tool-using steps per turn. Prevents the agent from
 		// trying to do fleet-shaped work in a single chat turn.
 		stopWhen: stepCountIs(5),

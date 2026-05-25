@@ -10,7 +10,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 
-	type Output = { ack?: boolean; query?: string; reason?: string };
+	type Output = { ack?: boolean; query?: string; reason?: string; storySlug?: string | null };
 
 	type Props = { output: unknown };
 	let { output }: Props = $props();
@@ -29,10 +29,13 @@
 		dispatching = true;
 		errorMsg = null;
 		try {
+			// Seed the run with the originating story (§17 Phase C) when this
+			// chip came from a story chat.
+			const storySlug = parsed?.storySlug ?? undefined;
 			const res = await fetch('/api/fleet/run', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ query })
+				body: JSON.stringify(storySlug ? { query, storySlug } : { query })
 			});
 			if (!res.ok) {
 				const body = await res.text().catch(() => '');
