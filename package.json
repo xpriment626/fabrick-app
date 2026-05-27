@@ -5,6 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
+		"dev:all": "bun run scripts/dev-stack.ts",
 		"dev:gateway": "bun run --watch services/fleet-gateway/src/index.ts",
 		"migrate:turso": "bun run scripts/migrate-turso.ts",
 		"build": "vite build",
