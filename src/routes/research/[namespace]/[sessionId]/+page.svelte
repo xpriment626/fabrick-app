@@ -67,7 +67,11 @@
 	<!-- Completed-run surfaces (§17): the dream inspector (what this run
 	     taught Fabrick) + the run-anchored follow-up chat. -->
 	{#if data.mode === 'archived'}
-		<DreamInspector atoms={data.dreamAtoms} />
+		<DreamInspector
+			atoms={data.dreamAtoms}
+			sessionId={data.sessionId}
+			lastDreamedAt={data.lastDreamedAt}
+		/>
 		<FleetRunChat sessionId={data.sessionId} initialChat={data.chat} />
 	{/if}
 {/key}

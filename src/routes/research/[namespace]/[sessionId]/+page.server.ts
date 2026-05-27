@@ -19,6 +19,7 @@ import { mintGatewayToken, gatewayEventsWsUrl } from '$lib/server/fleet-gateway'
 import { getFleetRunBySessionId } from '$lib/server/libsql';
 import { findChatByAnchor, loadChat } from '$lib/server/db/chats';
 import { listMemoryItems } from '$lib/server/fleet-memory';
+import { getLatestDreamRunForRun } from '$lib/server/dream-log';
 import { supabaseAdmin } from '$lib/server/supabase';
 
 export const load: PageServerLoad = async ({ params, url, locals }) => {
@@ -55,6 +56,13 @@ export const load: PageServerLoad = async ({ params, url, locals }) => {
 					kind: 'dream_item'
 				}).catch(() => []);
 
+				// Last dream act over this run (Stage 1): drives the inspector's
+				// "Last dreamed …" label + "Dream now" vs "Re-dream" toggle.
+				const latestDream = await getLatestDreamRunForRun(
+					locals.user.id,
+					archived.id
+				).catch(() => null);
+
 				return {
 					namespace,
 					sessionId,
@@ -72,7 +80,8 @@ export const load: PageServerLoad = async ({ params, url, locals }) => {
 						content: a.content,
 						salience: a.salience,
 						topicId: a.topicId
-					}))
+					})),
+					lastDreamedAt: latestDream?.createdAt ?? null
 				};
 			}
 		}
@@ -128,7 +137,8 @@ export const load: PageServerLoad = async ({ params, url, locals }) => {
 			// run has no synthesis to discuss yet.
 			synthesisText: null,
 			chat: null,
-			dreamAtoms: [] as { id: string; content: string; salience: number | null; topicId: string | null }[]
+			dreamAtoms: [] as { id: string; content: string; salience: number | null; topicId: string | null }[],
+			lastDreamedAt: null as number | null
 		};
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);

@@ -23,9 +23,10 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { generateText } from 'ai';
 import { resolveOpenrouterKey } from '$lib/server/chat-model';
-import { insertMemoryItems } from '$lib/server/fleet-memory';
+import { insertMemoryItems, supersedeMemoryItemsForRun } from '$lib/server/fleet-memory';
 import { writeWorkingMemory, readWorkingMemory } from '$lib/server/working-memory';
 import { setFleetRunTopic, type ArchivedFleetRun } from '$lib/server/libsql';
+import { logDreamRun, type DreamSchedule } from '$lib/server/dream-log';
 
 /** Reasoning model — good at extraction. Same default as chat for now. */
 const DREAM_MODEL_ID = 'deepseek/deepseek-v4-pro';
@@ -57,7 +58,15 @@ Rules:
 export type DreamResult = {
 	topic: string | null;
 	atomsWritten: number;
+	/** Live atoms from this run a manual re-dream retired (0 on first dream). */
+	atomsSuperseded: number;
 	workingMemoryUpdated: boolean;
+};
+
+export type RunDreamOptions = {
+	/** What triggered this dream — recorded in the dream_runs log. The archive
+	 *  path passes 'on-completion'; the manual re-dream endpoint passes 'manual'. */
+	schedule?: DreamSchedule;
 };
 
 type DreamOutput = {
@@ -70,66 +79,115 @@ type DreamOutput = {
  * Run the dream pass over a single archived run. Throws on hard failure —
  * use `triggerDreamPass` for the fire-and-forget archive-path call.
  */
-export async function runDreamPass(run: ArchivedFleetRun): Promise<DreamResult> {
-	const apiKey = await resolveOpenrouterKey(run.userId);
-	const model = createOpenAI({ baseURL: 'https://openrouter.ai/api/v1', apiKey }).chat(
-		DREAM_MODEL_ID
-	);
+export async function runDreamPass(
+	run: ArchivedFleetRun,
+	opts: RunDreamOptions = {}
+): Promise<DreamResult> {
+	const schedule = opts.schedule ?? 'on-completion';
+	const startedAt = Date.now();
 
-	const priorWm = (await readWorkingMemory(run.userId)) ?? '(none yet)';
-	const synthesis = (run.synthesisText ?? '(no synthesis text)').slice(0, MAX_SYNTHESIS_CHARS);
-
-	const userPrompt = [
-		`USER QUERY:\n${run.query}`,
-		``,
-		`RUN SYNTHESIS:\n${synthesis}`,
-		``,
-		`PRIOR WORKING MEMORY:\n${priorWm.slice(0, MAX_PRIOR_WM_CHARS)}`
-	].join('\n');
-
-	const { text } = await generateText({
-		model,
-		system: DREAM_SYSTEM_PROMPT,
-		prompt: userPrompt
-	});
-
-	const parsed = parseDreamOutput(text);
-	if (!parsed) {
-		throw new Error('dream pass: model did not return parseable JSON');
-	}
-
-	const topic = normalizeTopic(parsed.topic);
-	const atoms = normalizeAtoms(parsed.atoms);
-	const workingMemory = typeof parsed.working_memory === 'string' ? parsed.working_memory.trim() : '';
-
-	// Sink 1: atoms.
-	if (atoms.length > 0) {
-		await insertMemoryItems(
-			atoms.map((a) => ({
-				userId: run.userId,
-				kind: 'dream_item',
-				content: a.content,
-				salience: a.salience,
-				sourceRunId: run.id,
-				templateId: run.templateId,
-				topicId: topic
-			}))
+	try {
+		const apiKey = await resolveOpenrouterKey(run.userId);
+		const model = createOpenAI({ baseURL: 'https://openrouter.ai/api/v1', apiKey }).chat(
+			DREAM_MODEL_ID
 		);
-	}
 
-	// Sink 2: topic backfill on the archive row.
-	if (topic) {
-		await setFleetRunTopic(run.id, run.userId, topic);
-	}
+		const priorWm = (await readWorkingMemory(run.userId)) ?? '(none yet)';
+		const synthesis = (run.synthesisText ?? '(no synthesis text)').slice(0, MAX_SYNTHESIS_CHARS);
 
-	// Sink 3: working-memory synthesis (only if the model produced a non-empty one).
-	let workingMemoryUpdated = false;
-	if (workingMemory.length > 0) {
-		await writeWorkingMemory(run.userId, workingMemory);
-		workingMemoryUpdated = true;
-	}
+		const userPrompt = [
+			`USER QUERY:\n${run.query}`,
+			``,
+			`RUN SYNTHESIS:\n${synthesis}`,
+			``,
+			`PRIOR WORKING MEMORY:\n${priorWm.slice(0, MAX_PRIOR_WM_CHARS)}`
+		].join('\n');
 
-	return { topic, atomsWritten: atoms.length, workingMemoryUpdated };
+		const { text } = await generateText({
+			model,
+			system: DREAM_SYSTEM_PROMPT,
+			prompt: userPrompt
+		});
+
+		const parsed = parseDreamOutput(text);
+		if (!parsed) {
+			throw new Error('dream pass: model did not return parseable JSON');
+		}
+
+		const topic = normalizeTopic(parsed.topic);
+		const atoms = normalizeAtoms(parsed.atoms);
+		const workingMemory =
+			typeof parsed.working_memory === 'string' ? parsed.working_memory.trim() : '';
+
+		// Sink 1: atoms. A re-dream RETIRES the run's prior live atoms before
+		// inserting the fresh set so they don't duplicate (§16 Stage 1) — but
+		// only when the new dream actually produced atoms, so a flaky empty
+		// re-dream can't silently wipe curated memory. First dream supersedes 0.
+		let atomsSuperseded = 0;
+		if (atoms.length > 0) {
+			atomsSuperseded = await supersedeMemoryItemsForRun(run.userId, run.id);
+			await insertMemoryItems(
+				atoms.map((a) => ({
+					userId: run.userId,
+					kind: 'dream_item',
+					content: a.content,
+					salience: a.salience,
+					sourceRunId: run.id,
+					templateId: run.templateId,
+					topicId: topic
+				}))
+			);
+		}
+
+		// Sink 2: topic backfill on the archive row.
+		if (topic) {
+			await setFleetRunTopic(run.id, run.userId, topic);
+		}
+
+		// Sink 3: working-memory synthesis (only if the model produced a non-empty one).
+		let workingMemoryUpdated = false;
+		if (workingMemory.length > 0) {
+			await writeWorkingMemory(run.userId, workingMemory);
+			workingMemoryUpdated = true;
+		}
+
+		const result: DreamResult = {
+			topic,
+			atomsWritten: atoms.length,
+			atomsSuperseded,
+			workingMemoryUpdated
+		};
+
+		// Log the act (best-effort — a logging failure must not fail the dream).
+		await logDreamRun({
+			userId: run.userId,
+			sourceRunId: run.id,
+			schedule,
+			status: 'ok',
+			topic,
+			atomsWritten: result.atomsWritten,
+			atomsSuperseded: result.atomsSuperseded,
+			workingMemoryUpdated: result.workingMemoryUpdated,
+			durationMs: Date.now() - startedAt
+		}).catch((err) =>
+			console.warn('[dream-pass] dream_runs log failed (non-fatal):', err)
+		);
+
+		return result;
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		await logDreamRun({
+			userId: run.userId,
+			sourceRunId: run.id,
+			schedule,
+			status: 'error',
+			error: message,
+			durationMs: Date.now() - startedAt
+		}).catch((logErr) =>
+			console.warn('[dream-pass] dream_runs error-log failed (non-fatal):', logErr)
+		);
+		throw err;
+	}
 }
 
 /**
@@ -140,7 +198,7 @@ export function triggerDreamPass(run: ArchivedFleetRun): void {
 	runDreamPass(run)
 		.then((r) =>
 			console.log(
-				`[dream-pass] run ${run.id} (${run.templateId}) → topic=${r.topic ?? '∅'} atoms=${r.atomsWritten} wm=${r.workingMemoryUpdated}`
+				`[dream-pass] run ${run.id} (${run.templateId}) → topic=${r.topic ?? '∅'} atoms=${r.atomsWritten} superseded=${r.atomsSuperseded} wm=${r.workingMemoryUpdated}`
 			)
 		)
 		.catch((err) =>

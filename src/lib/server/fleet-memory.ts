@@ -28,6 +28,9 @@ export type FleetMemoryItem = {
 	topicId: string | null;
 	extractedAt: number;
 	dismissedAt: number | null;
+	/** Set when a later (manual) dream over the same source run replaced this
+	 *  atom. Distinct from dismissedAt (user rejection) — see migration 004. */
+	supersededAt: number | null;
 };
 
 export type MemoryItemInput = {
@@ -59,7 +62,8 @@ export async function insertMemoryItems(items: MemoryItemInput[]): Promise<Fleet
 		templateId: it.templateId ?? null,
 		topicId: it.topicId ?? null,
 		extractedAt: now,
-		dismissedAt: null
+		dismissedAt: null,
+		supersededAt: null
 	}));
 
 	await c.batch(
@@ -99,6 +103,9 @@ export type ListMemoryOpts = {
 	sourceRunId?: string;
 	/** Include dismissed rows (default false — dismissed are hidden). */
 	includeDismissed?: boolean;
+	/** Include superseded rows (default false — atoms a later dream replaced
+	 *  are hidden, same as dismissed). */
+	includeSuperseded?: boolean;
 	limit?: number;
 };
 
@@ -134,11 +141,14 @@ export async function listMemoryItems(
 	if (!opts.includeDismissed) {
 		where.push('dismissed_at IS NULL');
 	}
+	if (!opts.includeSuperseded) {
+		where.push('superseded_at IS NULL');
+	}
 
 	const limit = opts.limit ?? 200;
 	const res = await c.execute({
 		sql: `SELECT id, user_id, source_run_id, kind, content, salience,
-		             template_id, topic_id, extracted_at, dismissed_at
+		             template_id, topic_id, extracted_at, dismissed_at, superseded_at
 		      FROM fleet_memory_items
 		      WHERE ${where.join(' AND ')}
 		      ORDER BY extracted_at DESC
@@ -164,6 +174,27 @@ export async function dismissMemoryItem(id: string, userId: string): Promise<boo
 	return res.rowsAffected > 0;
 }
 
+/**
+ * Retire the live `dream_item` atoms a prior dream extracted from one run, so
+ * a manual re-dream replaces them instead of duplicating (§16 Stage 1). Only
+ * touches currently-live atoms (`superseded_at IS NULL AND dismissed_at IS
+ * NULL`) — already-dismissed atoms keep their final state, already-superseded
+ * ones stay as history. Returns how many were retired (0 on the first dream).
+ */
+export async function supersedeMemoryItemsForRun(
+	userId: string,
+	sourceRunId: string
+): Promise<number> {
+	const c = getLibsqlClient();
+	const res = await c.execute({
+		sql: `UPDATE fleet_memory_items SET superseded_at = ?
+		      WHERE user_id = ? AND source_run_id = ? AND kind = 'dream_item'
+		        AND superseded_at IS NULL AND dismissed_at IS NULL`,
+		args: [Date.now(), userId, sourceRunId]
+	});
+	return res.rowsAffected;
+}
+
 function rowToMemoryItem(row: Record<string, unknown>): FleetMemoryItem {
 	return {
 		id: row.id as string,
@@ -175,6 +206,7 @@ function rowToMemoryItem(row: Record<string, unknown>): FleetMemoryItem {
 		templateId: (row.template_id as string | null) ?? null,
 		topicId: (row.topic_id as string | null) ?? null,
 		extractedAt: Number(row.extracted_at),
-		dismissedAt: row.dismissed_at != null ? Number(row.dismissed_at) : null
+		dismissedAt: row.dismissed_at != null ? Number(row.dismissed_at) : null,
+		supersededAt: row.superseded_at != null ? Number(row.superseded_at) : null
 	};
 }
