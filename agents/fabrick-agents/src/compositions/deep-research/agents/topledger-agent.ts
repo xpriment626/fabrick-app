@@ -1,7 +1,7 @@
 import { Agent } from '@mastra/core/agent'
-import { buildModel } from '../model.js'
-import { getCoralTools } from '../mcp/coral-mcp-client.js'
-import { getTopledgerTools } from '../mcp/topledger-mcp-client.js'
+import { buildModel } from '@shared/model.js'
+import { getCoralTools } from '@shared/mcp/coral-mcp-client.js'
+import { getTopledgerTools } from '@deep-research/mcp/topledger-mcp-client.js'
 
 export async function makeTopledgerAgent(): Promise<Agent> {
 	const coralTools = await getCoralTools()

@@ -1,7 +1,7 @@
 import { Agent } from '@mastra/core/agent'
-import { buildModel } from '../model.js'
-import { getCoralTools } from '../mcp/coral-mcp-client.js'
-import { getJupiterTools } from '../mcp/jupiter-mcp-client.js'
+import { buildModel } from '@shared/model.js'
+import { getCoralTools } from '@shared/mcp/coral-mcp-client.js'
+import { getJupiterTools } from '@deep-research/mcp/jupiter-mcp-client.js'
 
 export async function makeTokenInfoAgent(): Promise<Agent> {
 	const coralTools = await getCoralTools()

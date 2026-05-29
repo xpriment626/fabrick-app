@@ -1,6 +1,6 @@
 import { Agent } from '@mastra/core/agent'
-import { buildModel } from '../model.js'
-import { getCoralTools, getCoralStateReadTool } from '../mcp/coral-mcp-client.js'
+import { buildModel } from '@shared/model.js'
+import { getCoralTools, getCoralStateReadTool } from '@shared/mcp/coral-mcp-client.js'
 
 export async function makeResearchOrchestrator(options?: {
 	promptSuffix?: string

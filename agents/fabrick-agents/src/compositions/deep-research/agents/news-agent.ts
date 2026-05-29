@@ -1,7 +1,7 @@
 import { Agent } from '@mastra/core/agent'
-import { buildModel } from '../model.js'
-import { getCoralTools } from '../mcp/coral-mcp-client.js'
-import { getCoindeskTools } from '../mcp/coindesk-mcp-client.js'
+import { buildModel } from '@shared/model.js'
+import { getCoralTools } from '@shared/mcp/coral-mcp-client.js'
+import { getCoindeskTools } from '@deep-research/mcp/coindesk-mcp-client.js'
 
 export async function makeNewsAgent(): Promise<Agent> {
 	const coralTools = await getCoralTools()

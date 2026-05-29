@@ -8,7 +8,24 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
-AGENT_PATH="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
+
+# Walk upward from SCRIPT_DIR to find the fabrick-agents package.json.
+# Refactor-tolerant: agent dirs can move within the package (e.g. into
+# composition subdirs) without breaking AGENT_PATH resolution.
+find_agent_path() {
+	local dir="$1"
+	while [ "$dir" != "/" ]; do
+		if [ -f "$dir/package.json" ] && grep -q '"name": "fabrick-agents"' "$dir/package.json" 2>/dev/null; then
+			echo "$dir"
+			return 0
+		fi
+		dir="$(dirname "$dir")"
+	done
+	echo "FATAL: could not locate fabrick-agents package.json above $SCRIPT_DIR" >&2
+	exit 1
+}
+
+AGENT_PATH="$(find_agent_path "$SCRIPT_DIR")"
 AGENT_KEY="defillamaAgent"
 
 echo "=== Coral fabrick-defillama-agent ==="

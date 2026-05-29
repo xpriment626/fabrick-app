@@ -1,6 +1,6 @@
 import { Agent } from '@mastra/core/agent'
-import { buildModel } from '../model.js'
-import { getCoralTools } from '../mcp/coral-mcp-client.js'
+import { buildModel } from '@shared/model.js'
+import { getCoralTools } from '@shared/mcp/coral-mcp-client.js'
 
 /**
  * Grok specialist — uses x-ai/grok-4.3 via OpenRouter, which auto-wires

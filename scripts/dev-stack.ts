@@ -37,7 +37,7 @@
  * (cwd = ROOT) rather than living in sibling dirs.
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
@@ -52,8 +52,21 @@ const CORAL_SERVER_DIR =
 const CORAL_CONFIG = process.env.CONFIG_FILE_PATH ?? join(CORAL_SERVER_DIR, 'config.toml');
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const AGENTS_DIR = join(ROOT, 'agents', 'fabrick-agents', 'coral');
-const AGENTS = [
+
+// Per-composition agent contribution. Each composition declares its source
+// dir + agent names; the launcher merges them into a flat AGENT_DIRS map for
+// the link preflight. Adding a new composition is one block below — no
+// changes needed elsewhere in this file.
+const DEEP_RESEARCH_AGENTS_DIR = join(
+	ROOT,
+	'agents',
+	'fabrick-agents',
+	'src',
+	'compositions',
+	'deep-research',
+	'coral'
+);
+const DEEP_RESEARCH_AGENTS = [
 	'fabrick-research-orchestrator',
 	'fabrick-exa-agent',
 	'fabrick-grok-agent',
@@ -62,6 +75,12 @@ const AGENTS = [
 	'fabrick-token-info-agent',
 	'fabrick-topledger-agent'
 ];
+
+const AGENT_DIRS: Record<string, string> = Object.fromEntries(
+	DEEP_RESEARCH_AGENTS.map((a) => [a, join(DEEP_RESEARCH_AGENTS_DIR, a)])
+	// Future compositions: spread additional `Map.map(...)` entries here.
+);
+const AGENTS = Object.keys(AGENT_DIRS);
 const PORTS = [5555, 8787, 5173];
 
 // ---- pretty prefixed logging ------------------------------------------------
@@ -86,14 +105,37 @@ function pipe(tag: Tag, child: ChildProcess) {
 }
 
 // ---- 1. preflight: ensure agents are linked into ~/.coral/agents ------------
-// No-op once linked; matters on a fresh clone. npx coral-server discovers
-// agents from ~/.coral/agents, which the coralizer populates.
+// Coral-server discovers agents from ~/.coral/agents, which the coralizer
+// populates. On a fresh clone every agent needs a link. On an existing setup
+// we additionally check that each link still resolves to the current source
+// — if an agent dir has moved (e.g. an internal refactor like
+// shared/compositions split), the link's coral-agent.toml resolves to a
+// stale path and coral fails to load the agent. Detect that and re-link.
 function ensureLinked() {
 	for (const a of AGENTS) {
-		if (existsSync(join(homedir(), '.coral', 'agents', a))) continue;
+		const linkRoot = join(homedir(), '.coral', 'agents', a);
+		const sourceAgentDir = AGENT_DIRS[a];
+
+		if (existsSync(linkRoot)) {
+			let stale = true;
+			try {
+				// Coralizer creates ~/.coral/agents/<name>/<version>/coral-agent.toml.
+				// 0.1.0 is fabrick's agent version constant; bump here if the agents
+				// versioning changes en-masse.
+				const resolvedLinked = realpathSync(join(linkRoot, '0.1.0', 'coral-agent.toml'));
+				const resolvedSource = realpathSync(join(sourceAgentDir, 'coral-agent.toml'));
+				if (resolvedLinked === resolvedSource) stale = false;
+			} catch {
+				// realpath threw — broken symlink (target moved/missing).
+			}
+			if (!stale) continue;
+			log('launcher', `${a}: stale symlink — removing + re-linking`);
+			rmSync(linkRoot, { recursive: true, force: true });
+		}
+
 		log('launcher', `linking ${a} (coralizer)…`);
 		const r = spawnSync('npx', ['-y', '@coral-protocol/coralizer@latest', 'link', '.'], {
-			cwd: join(AGENTS_DIR, a),
+			cwd: sourceAgentDir,
 			stdio: 'inherit'
 		});
 		if (r.status !== 0) log('launcher', `⚠ failed to link ${a} (status ${r.status})`);
