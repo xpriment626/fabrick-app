@@ -104,6 +104,35 @@ function pipe(tag: Tag, child: ChildProcess) {
 	child.stderr?.on('data', (d) => log(tag, d.toString()));
 }
 
+// ---- 0. preflight: Node version floor ---------------------------------------
+// The app's SSR path pulls jsdom (via isomorphic-dompurify in Markdown.svelte),
+// whose transitive @exodus/bytes is ESM-only and gets require()'d by CJS
+// html-encoding-sniffer. That require(esm) only works on Node >=20.19 / >=22.12.
+// Older node (e.g. a lingering /usr/local/bin/node) throws a cryptic deep
+// ERR_REQUIRE_ESM at run-page render time. We resolve the node the SPAWN
+// context will actually use (not bun's node-compat) and warn loudly upfront.
+const NODE_FLOOR = [20, 19, 0]; // require(esm) support threshold
+function checkNodeVersion() {
+	const raw = spawnSync('node', ['-v'], { encoding: 'utf-8' }).stdout?.trim() ?? '';
+	const m = raw.match(/^v(\d+)\.(\d+)\.(\d+)/);
+	if (!m) {
+		log('launcher', `⚠ could not resolve spawn-context node version ("${raw}") — skipping floor check`);
+		return;
+	}
+	const v = [Number(m[1]), Number(m[2]), Number(m[3])];
+	const below =
+		v[0] < NODE_FLOOR[0] ||
+		(v[0] === NODE_FLOOR[0] && v[1] < NODE_FLOOR[1]);
+	if (below) {
+		log(
+			'launcher',
+			`⚠⚠ Node ${raw} is below the required floor v${NODE_FLOOR.join('.')} — the run page will crash on render with ERR_REQUIRE_ESM (require(esm) of @exodus/bytes via jsdom). Fix: \`nvm use\` (see .nvmrc) or update your default node. Continuing, but expect SSR failures.`
+		);
+	} else {
+		log('launcher', `node ${raw} ✓ (>= v${NODE_FLOOR.join('.')})`);
+	}
+}
+
 // ---- 1. preflight: ensure agents are linked into ~/.coral/agents ------------
 // Coral-server discovers agents from ~/.coral/agents, which the coralizer
 // populates. On a fresh clone every agent needs a link. On an existing setup
@@ -205,6 +234,7 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 // ---- go ---------------------------------------------------------------------
 log('launcher', 'Fabrick — local stack starting. Ctrl-C stops everything.');
+checkNodeVersion();
 ensureLinked();
 
 // coral-server first (slowest — gradle build + JVM boot); gateway + app
