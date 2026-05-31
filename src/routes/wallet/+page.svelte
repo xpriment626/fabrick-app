@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { PageData } from './$types';
+	import AgentSigningCard from '$lib/components/AgentSigningCard.svelte';
 
 	type Props = { data: PageData };
 	let { data }: Props = $props();
@@ -123,15 +124,18 @@
 		</section>
 	{/if}
 
-	<!-- Connectors empty state -->
-	<section
-		class="mt-12 rounded-card border border-dashed border-border bg-transparent p-6"
-	>
+	<!-- Agent signing — the live policy-scoped delegation opt-in (§18). -->
+	<div class="mt-12">
+		<AgentSigningCard authKeyId={data.agentSigning.authKeyId} policyId={data.agentSigning.policyId} />
+	</div>
+
+	<!-- Connectors empty state — the broader future (more venues). -->
+	<section class="mt-4 rounded-card border border-dashed border-border bg-transparent p-6">
 		<div class="eyebrow mb-2 text-muted">Coming soon</div>
-		<h3 class="mb-1.5 text-[17px] font-bold text-ink">Connectors</h3>
+		<h3 class="mb-1.5 text-[17px] font-bold text-ink">More connectors</h3>
 		<p class="text-[13px] leading-relaxed text-muted">
-			Add policy-scoped agent signers to let Fabrick agents act on your behalf within Drift,
-			Jupiter, Marginfi, and more.
+			Policy-scoped agent signers across Drift, Jupiter, Marginfi, and more — each with its own
+			guardrails.
 		</p>
 	</section>
 </main>

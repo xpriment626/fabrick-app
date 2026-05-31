@@ -232,8 +232,27 @@ function shutdown(reason: string) {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
+// ---- auth mode --------------------------------------------------------------
+// Two launch modes, both folding coral + gateway + app into one command:
+//   (default)  bypass  — DEV_AUTH_PRIVY_DID='*' → hooks.server.ts auto-auths
+//                        as the first users row (Playwright / quick browsing).
+//   --auth     sign-in — DEV_AUTH_PRIVY_DID='' → bypass OFF → real Privy login
+//                        required (the path delegation/signing tests need, since
+//                        delegateWallet needs a genuine client Privy session).
+// We inject the value into the APP child's env. dotenv (used by SvelteKit's
+// $env/dynamic/private) does NOT clobber an already-set process.env key, so the
+// injected value wins over whatever .env declares — verified empirically.
+const AUTH_MODE = process.argv.includes('--auth');
+const DEV_AUTH_VALUE = AUTH_MODE ? '' : '*';
+
 // ---- go ---------------------------------------------------------------------
 log('launcher', 'Fabrick — local stack starting. Ctrl-C stops everything.');
+log(
+	'launcher',
+	AUTH_MODE
+		? '🔐 SIGN-IN mode — real Privy login required (dev bypass OFF).'
+		: '⚡ BYPASS mode — auto-authed as first user (dev bypass ON). Use --auth for real login.'
+);
 checkNodeVersion();
 ensureLinked();
 
@@ -250,7 +269,7 @@ if (!existsSync(join(CORAL_SERVER_DIR, 'gradlew'))) {
 	});
 }
 start('gateway', 'npm', ['run', 'dev:gateway']);
-start('app', 'npm', ['run', 'dev']);
+start('app', 'npm', ['run', 'dev'], ROOT, { DEV_AUTH_PRIVY_DID: DEV_AUTH_VALUE });
 
 log(
 	'launcher',

@@ -9,6 +9,7 @@
 	"scripts": {
 		"dev": "vite dev",
 		"dev:all": "bun run scripts/dev-stack.ts",
+		"dev:all:auth": "bun run scripts/dev-stack.ts --auth",
 		"dev:gateway": "bun run --watch services/fleet-gateway/src/index.ts",
 		"migrate:turso": "bun run scripts/migrate-turso.ts",
 		"build": "vite build",
@@ -39,6 +40,7 @@
 		"@mastra/libsql": "^1.11.0",
 		"@mastra/memory": "^1.18.2",
 		"@privy-io/js-sdk-core": "^0.63.0",
+		"@privy-io/node": "^0.19.0",
 		"@privy-io/server-auth": "^1.32.5",
 		"@supabase/supabase-js": "^2.105.3",
 		"ai": "^6.0.180",

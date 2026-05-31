@@ -13,6 +13,7 @@
  */
 
 import { redirect } from '@sveltejs/kit';
+import { env } from '$env/dynamic/private';
 import type { PageServerLoad } from './$types';
 import { loadWalletSnapshot } from '$lib/server/wallet';
 import {
@@ -20,17 +21,27 @@ import {
 	type WalletSnapshot
 } from '$lib/placeholder-data';
 
-export const load: PageServerLoad = async ({
-	locals
-}): Promise<{ walletSnapshot: WalletSnapshot }> => {
+export const load: PageServerLoad = async ({ locals }) => {
 	if (!locals.user) throw redirect(302, '/');
+
+	// Agent-signing enablement config (§18 Phase A). Non-secret identifiers:
+	// the authorization-key id Fabrick's server signs with + the wallet policy
+	// that bounds it. The authorization PRIVATE key never leaves the server.
+	// The card renders its "enable" affordance only when both are configured.
+	const agentSigning = {
+		authKeyId: env.PRIVY_AUTHORIZATION_KEY_ID ?? null,
+		policyId: env.PRIVY_TEST_POLICY_ID ?? null
+	};
+
 	const address = locals.user.solanaAddress;
-	if (!address) return { walletSnapshot: fallbackWallet };
+	if (!address) {
+		return { walletSnapshot: fallbackWallet as WalletSnapshot, agentSigning };
+	}
 	try {
 		const walletSnapshot = await loadWalletSnapshot(address);
-		return { walletSnapshot };
+		return { walletSnapshot, agentSigning };
 	} catch (err) {
 		console.warn('[wallet] snapshot fell back to placeholder:', err);
-		return { walletSnapshot: fallbackWallet };
+		return { walletSnapshot: fallbackWallet as WalletSnapshot, agentSigning };
 	}
 };

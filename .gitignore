@@ -36,3 +36,8 @@ vite.config.ts.timestamp-*
 scripts/.spike-data/
 scripts/**/*.db
 scripts/**/*.db-journal
+
+# Local / throwaway scripts — ad-hoc setup + testing harnesses (Privy signing
+# ladder, policy setup, etc.). Real tooling (dev-stack, migrate-turso) stays
+# tracked under scripts/. Put anything you don't want committed in here.
+scripts/local/
