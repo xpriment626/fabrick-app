@@ -16,6 +16,7 @@ import { redirect } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import type { PageServerLoad } from './$types';
 import { loadWalletSnapshot } from '$lib/server/wallet';
+import { listSavingsAccounts } from '$lib/server/savings-accounts';
 import {
 	walletSnapshot as fallbackWallet,
 	type WalletSnapshot
@@ -23,6 +24,15 @@ import {
 
 export const load: PageServerLoad = async ({ locals }) => {
 	if (!locals.user) throw redirect(302, '/');
+
+	// Savings accounts drive the §20 create-account gate (no account → create CTA;
+	// junior → catalogue view; senior → proposed-allocation card). Survives reload.
+	let savingsAccounts: Awaited<ReturnType<typeof listSavingsAccounts>> = [];
+	try {
+		savingsAccounts = await listSavingsAccounts(locals.user.id);
+	} catch (err) {
+		console.warn('[wallet] savings accounts load failed:', err);
+	}
 
 	// Agent-signing enablement config (§18 Phase A). Non-secret identifiers:
 	// the authorization-key id Fabrick's server signs with + the wallet policy
@@ -35,13 +45,13 @@ export const load: PageServerLoad = async ({ locals }) => {
 
 	const address = locals.user.solanaAddress;
 	if (!address) {
-		return { walletSnapshot: fallbackWallet as WalletSnapshot, agentSigning };
+		return { walletSnapshot: fallbackWallet as WalletSnapshot, agentSigning, savingsAccounts };
 	}
 	try {
 		const walletSnapshot = await loadWalletSnapshot(address);
-		return { walletSnapshot, agentSigning };
+		return { walletSnapshot, agentSigning, savingsAccounts };
 	} catch (err) {
 		console.warn('[wallet] snapshot fell back to placeholder:', err);
-		return { walletSnapshot: fallbackWallet as WalletSnapshot, agentSigning };
+		return { walletSnapshot: fallbackWallet as WalletSnapshot, agentSigning, savingsAccounts };
 	}
 };

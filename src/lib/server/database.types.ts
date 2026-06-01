@@ -231,6 +231,47 @@ export type Database = {
           },
         ]
       }
+      savings_accounts: {
+        Row: {
+          config: Json
+          created_at: string
+          id: string
+          proposed_allocation: Json | null
+          status: string
+          type: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          config?: Json
+          created_at?: string
+          id?: string
+          proposed_allocation?: Json | null
+          status?: string
+          type: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string
+          id?: string
+          proposed_allocation?: Json | null
+          status?: string
+          type?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "savings_accounts_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["privy_user_id"]
+          },
+        ]
+      }
       user_settings: {
         Row: {
           openrouter_api_key_encrypted: string | null

@@ -49,3 +49,48 @@ export type SavingsCatalogue = {
 	counts: { defaults: number; lend: number; earn: number; multiply: number; total: number };
 	generatedAt: string;
 };
+
+// ---------------------------------------------------------------- Senior accounts (Slice 2)
+
+export type SavingsAccountType = 'junior' | 'senior';
+export type RiskPreference = 'conservative' | 'balanced' | 'aggressive';
+
+/** The senior-account config the user submits — the "mandate" the agents reason against. */
+export type SeniorMandate = {
+	selectedPoolIds: string[];
+	intendedAmountUsd: number;
+	riskPreference: RiskPreference;
+};
+
+export type AllocationWeight = {
+	poolId: string;
+	title: string;
+	product: SavingsProduct;
+	asset: SavingsAsset;
+	/** Target weight 0–100. Weights across an allocation sum to ~100. */
+	weightPct: number;
+	/** This pool's APY (fraction) at proposal time, for the blended estimate. */
+	apy: number;
+};
+
+/** The agent sequence's output — the proposed senior strategy. */
+export type AllocationDecision = {
+	weights: AllocationWeight[];
+	/** Weight-blended expected APY (fraction). */
+	blendedApyPct: number;
+	/** One-line risk envelope, e.g. "Balanced — 3 blue-chip reserves + 1 managed vault". */
+	riskEnvelope: string;
+	/** Plain-language rebalancing strategy (triggers + cadence). */
+	rebalanceStrategy: string;
+	/** Why this allocation, given the mandate. */
+	rationale: string;
+};
+
+export type SavingsAccountRecord = {
+	id: string;
+	type: SavingsAccountType;
+	status: string;
+	config: Partial<SeniorMandate> & Record<string, unknown>;
+	proposedAllocation: AllocationDecision | null;
+	createdAt: string;
+};

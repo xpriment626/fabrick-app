@@ -1,16 +1,63 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { PageData } from './$types';
-	import type { OpportunityCard, SavingsCatalogue } from '$lib/savings/types';
+	import type {
+		OpportunityCard,
+		SavingsAccountRecord,
+		SavingsCatalogue
+	} from '$lib/savings/types';
 	import AgentSigningCard from '$lib/components/AgentSigningCard.svelte';
 	import SavingsCard from '$lib/components/SavingsCard.svelte';
 	import ReceiveModal from '$lib/components/ReceiveModal.svelte';
 	import SendModal from '$lib/components/SendModal.svelte';
+	import SeniorBuilder from '$lib/components/SeniorBuilder.svelte';
+	import SeniorAllocationCard from '$lib/components/SeniorAllocationCard.svelte';
 
 	type Props = { data: PageData };
 	let { data }: Props = $props();
 
 	const wallet = $derived(data.walletSnapshot);
+
+	// --- Savings accounts + create-account gate (§20 Slice 2) -------------------
+	// Accounts = SSR-loaded (data) + any created this session (extraAccounts),
+	// derived so we don't freeze a snapshot of the reactive `data` prop.
+	let extraAccounts = $state<SavingsAccountRecord[]>([]);
+	const accounts = $derived<SavingsAccountRecord[]>([
+		...extraAccounts,
+		...(data.savingsAccounts ?? [])
+	]);
+	let creating = $state<null | 'choosing' | 'senior'>(null);
+	let juniorBusy = $state(false);
+	let createError = $state<string | null>(null);
+
+	const hasJunior = $derived(accounts.some((a) => a.type === 'junior'));
+	const seniorAccounts = $derived(accounts.filter((a) => a.type === 'senior'));
+
+	async function createJunior() {
+		if (juniorBusy) return;
+		juniorBusy = true;
+		createError = null;
+		try {
+			const res = await fetch('/api/savings/accounts', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ type: 'junior' })
+			});
+			const body = await res.json();
+			if (!res.ok || !body?.account) throw new Error(body?.message ?? `create failed (${res.status})`);
+			extraAccounts = [body.account as SavingsAccountRecord, ...extraAccounts];
+			creating = null;
+		} catch (err) {
+			createError = err instanceof Error ? err.message : String(err);
+		} finally {
+			juniorBusy = false;
+		}
+	}
+
+	function onSeniorProposed(account: SavingsAccountRecord) {
+		extraAccounts = [account, ...extraAccounts];
+		creating = null;
+	}
 
 	// Wallet-standard Deposit (receive: QR + copy) / Withdraw (send: recipient).
 	let walletModal = $state<'receive' | 'send' | null>(null);
@@ -192,47 +239,136 @@
 			</button>
 		</section>
 
-		<!-- Your savings (the two Main Market one-click defaults) -->
+		<!-- Savings accounts (§20 Slice 2) — create-account gate -->
 		<section class="mb-10">
-			<div class="mb-3 flex items-baseline justify-between">
-				<h2 class="text-[15px] font-bold text-ink">Your savings options</h2>
-				<span class="text-[12px] text-muted">SOL + USDC · pre-curated</span>
-			</div>
+			{#if creating === 'choosing'}
+				<!-- Junior vs Senior choice -->
+				<div class="mb-3 flex items-center justify-between">
+					<h2 class="text-[15px] font-bold text-ink">Create a savings account</h2>
+					<button type="button" onclick={() => (creating = null)} class="text-[13px] text-muted hover:text-ink">
+						Cancel
+					</button>
+				</div>
+				<div class="grid grid-cols-2 gap-4">
+					<button
+						type="button"
+						onclick={createJunior}
+						disabled={juniorBusy}
+						class="flex flex-col items-start gap-2 rounded-card border border-border bg-surface p-5 text-left transition-colors hover:border-ink disabled:opacity-50"
+					>
+						<span class="text-[15px] font-bold text-ink">Junior</span>
+						<span class="text-[12.5px] leading-relaxed text-muted">
+							One-click into a single blue-chip pool (Main Market USDC or SOL). The simplest save.
+						</span>
+						<span class="mt-1 text-[12px] font-semibold text-ink">{juniorBusy ? 'Creating…' : 'Create junior →'}</span>
+					</button>
+					<button
+						type="button"
+						onclick={() => (creating = 'senior')}
+						class="flex flex-col items-start gap-2 rounded-card border border-border bg-surface p-5 text-left transition-colors hover:border-ink"
+					>
+						<span class="text-[15px] font-bold text-ink">Senior</span>
+						<span class="text-[12.5px] leading-relaxed text-muted">
+							Compose multiple pools; Fabrick's agents propose a custom weighting + rebalancing strategy.
+						</span>
+						<span class="mt-1 text-[12px] font-semibold text-ink">Compose senior →</span>
+					</button>
+				</div>
+				{#if createError}<p class="mt-3 text-[12px] text-negative">{createError}</p>{/if}
+			{:else if creating === 'senior'}
+				{#if catalogue}
+					<SeniorBuilder {catalogue} onProposed={onSeniorProposed} onCancel={() => (creating = null)} />
+				{:else}
+					<div class="rounded-card border border-border bg-surface p-6 text-[13px] text-muted">
+						Loading catalogue…
+					</div>
+				{/if}
+			{:else if accounts.length === 0}
+				<!-- No savings account yet → create gate -->
+				<div
+					class="flex flex-col items-center gap-3 rounded-card border border-dashed border-border bg-surface px-6 py-12 text-center"
+				>
+					<div class="text-[17px] font-bold text-ink">No savings account yet</div>
+					<p class="max-w-[380px] text-[13px] leading-relaxed text-muted">
+						Open a savings account to start earning on your SOL or USDC — a simple one-click pool, or a
+						custom multi-pool strategy composed by Fabrick's agents.
+					</p>
+					<button
+						type="button"
+						onclick={() => (creating = 'choosing')}
+						class="mt-1 rounded-[10px] bg-ink px-5 py-2.5 text-[13px] font-semibold text-surface transition-opacity hover:opacity-90"
+					>
+						Create savings account
+					</button>
+				</div>
+			{:else}
+				<!-- Existing accounts -->
+				<div class="mb-3 flex items-center justify-between">
+					<h2 class="text-[15px] font-bold text-ink">Your savings</h2>
+					<button
+						type="button"
+						onclick={() => (creating = 'choosing')}
+						class="text-[12.5px] font-semibold text-ink underline-offset-2 hover:underline"
+					>
+						+ New account
+					</button>
+				</div>
 
-			{#if catState === 'loading'}
-				<div class="grid grid-cols-2 gap-4">
-					{#each [0, 1] as i (i)}
-						<div class="h-[188px] animate-pulse rounded-card border border-border bg-surface"></div>
-					{/each}
-				</div>
-			{:else if catState === 'error'}
-				<div class="rounded-card border border-border bg-surface p-6 text-[13px] text-negative">
-					Couldn't load the savings catalogue. Refresh to retry.
-				</div>
-			{:else if catalogue}
-				<div class="grid grid-cols-2 gap-4">
-					{#each catalogue.defaults as card (card.id)}
-						<SavingsCard {card} variant="default" onDeposit={openDeposit} />
-					{/each}
-				</div>
+				{#each seniorAccounts as acct (acct.id)}
+					{#if acct.proposedAllocation}
+						<div class="mb-4">
+							<SeniorAllocationCard
+								allocation={acct.proposedAllocation}
+								intendedAmountUsd={acct.config?.intendedAmountUsd}
+								riskPreference={acct.config?.riskPreference}
+							/>
+						</div>
+					{/if}
+				{/each}
+
+				{#if hasJunior}
+					<div class="mb-2 flex items-baseline justify-between">
+						<h3 class="text-[14px] font-semibold text-ink">Junior · one-click pools</h3>
+						<span class="text-[12px] text-muted">SOL + USDC · pre-curated</span>
+					</div>
+					{#if catState === 'loading'}
+						<div class="grid grid-cols-2 gap-4">
+							{#each [0, 1] as i (i)}
+								<div class="h-[188px] animate-pulse rounded-card border border-border bg-surface"></div>
+							{/each}
+						</div>
+					{:else if catState === 'error'}
+						<div class="rounded-card border border-border bg-surface p-6 text-[13px] text-negative">
+							Couldn't load the catalogue.
+						</div>
+					{:else if catalogue}
+						<div class="grid grid-cols-2 gap-4">
+							{#each catalogue.defaults as card (card.id)}
+								<SavingsCard {card} variant="default" onDeposit={openDeposit} />
+							{/each}
+						</div>
+						<div class="mt-6">
+							<button
+								type="button"
+								onclick={() => (showDiscover = !showDiscover)}
+								class="flex w-full items-center justify-between border-b border-border pb-3 text-left"
+							>
+								<span class="text-[14px] font-bold text-ink">Browse rates</span>
+								<span class="text-[12.5px] font-medium text-muted">
+									{browseCards.length} more opportunities · {showDiscover ? 'Hide' : 'Discover'}
+								</span>
+							</button>
+							{#if showDiscover}
+								<div class="mt-4 flex flex-col gap-2.5">
+									{#each browseCards as card (card.id)}
+										<SavingsCard {card} variant="browse" />
+									{/each}
+								</div>
+							{/if}
+						</div>
+					{/if}
+				{/if}
 			{/if}
-
-			<div class="mt-3 flex gap-3">
-				<button
-					type="button"
-					disabled
-					class="flex-1 rounded-[10px] border border-border bg-surface px-3 py-2 text-[12.5px] font-semibold text-muted"
-				>
-					Manage savings accounts — soon
-				</button>
-				<button
-					type="button"
-					disabled
-					class="flex-1 rounded-[10px] border border-dashed border-border bg-transparent px-3 py-2 text-[12.5px] font-semibold text-muted"
-				>
-					+ Create savings account — soon
-				</button>
-			</div>
 		</section>
 
 		<!-- Portfolio / Collectibles -->
@@ -291,33 +427,7 @@
 			</section>
 		{/if}
 
-		<!-- Browse rates / Discover -->
-		<section class="mb-10">
-			<button
-				type="button"
-				onclick={() => (showDiscover = !showDiscover)}
-				class="flex w-full items-center justify-between border-b border-border pb-3 text-left"
-			>
-				<span class="text-[15px] font-bold text-ink">Browse rates</span>
-				<span class="text-[12.5px] font-medium text-muted">
-					{catalogue ? `${browseCards.length} more opportunities` : ''} · {showDiscover ? 'Hide' : 'Discover'}
-				</span>
-			</button>
-
-			{#if showDiscover}
-				<div class="mt-4 flex flex-col gap-2.5">
-					{#if catState === 'loaded' && catalogue}
-						{#each browseCards as card (card.id)}
-							<SavingsCard {card} variant="browse" />
-						{/each}
-					{:else if catState === 'loading'}
-						<div class="py-6 text-center text-[13px] text-muted">Loading opportunities…</div>
-					{/if}
-				</div>
-			{/if}
-		</section>
-
-		<!-- Advanced — autonomous agent signing (Slice 2 / senior accounts) -->
+		<!-- Advanced — autonomous agent signing (deferred execution slice) -->
 		<section class="mt-2">
 			<div class="eyebrow mb-3 text-muted">Advanced</div>
 			<AgentSigningCard
