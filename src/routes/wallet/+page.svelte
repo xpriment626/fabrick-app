@@ -1,25 +1,83 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import type { PageData } from './$types';
+	import type { OpportunityCard, SavingsCatalogue } from '$lib/savings/types';
 	import AgentSigningCard from '$lib/components/AgentSigningCard.svelte';
+	import SavingsCard from '$lib/components/SavingsCard.svelte';
 
 	type Props = { data: PageData };
 	let { data }: Props = $props();
 
 	const wallet = $derived(data.walletSnapshot);
 
-	const actions = [
-		{ label: 'Buy', icon: 'dollar' },
-		{ label: 'Swap', icon: 'swap' },
-		{ label: 'Send', icon: 'send' },
-		{ label: 'Receive', icon: 'receive' }
-	] as const;
+	// --- Savings catalogue (design §20) — public, fund-independent, client-fetched.
+	let catalogue = $state<SavingsCatalogue | null>(null);
+	let catState = $state<'loading' | 'loaded' | 'error'>('loading');
+	let showDiscover = $state(false);
 
-	const tabs = ['Tokens', 'DeFi', 'NFTs', 'Activity'] as const;
-	let activeTab = $state<(typeof tabs)[number]>('Tokens');
+	const browseCards = $derived<OpportunityCard[]>(
+		catalogue ? [...catalogue.lend, ...catalogue.earn, ...catalogue.multiply] : []
+	);
 
-	// --- Cluster toggle (§18) -------------------------------------------------
-	// Mainnet view is SSR-loaded (Helius v0 REST = mainnet-only). Devnet is lazy:
-	// fetched once, the first time the user flips the toggle, from /api/wallet/devnet.
+	onMount(async () => {
+		try {
+			const res = await fetch('/api/savings/catalogue');
+			if (!res.ok) throw new Error(String(res.status));
+			catalogue = (await res.json()) as SavingsCatalogue;
+			catState = 'loaded';
+		} catch {
+			catState = 'error';
+		}
+	});
+
+	// --- Deposit flow (Slice 1: Main Market reserve supply; simulate-only) -------
+	type DepositPhase = 'idle' | 'simulating' | 'ready' | 'error';
+	let depositTarget = $state<OpportunityCard | null>(null);
+	let depositAmount = $state('1');
+	let depositPhase = $state<DepositPhase>('idle');
+	let depositMsg = $state<string | null>(null);
+
+	function openDeposit(card: OpportunityCard) {
+		depositTarget = card;
+		depositAmount = card.asset === 'USDC' ? '1' : '0.05';
+		depositPhase = 'idle';
+		depositMsg = null;
+	}
+	function closeDeposit() {
+		depositTarget = null;
+	}
+
+	async function simulateDeposit() {
+		if (!depositTarget) return;
+		depositPhase = 'simulating';
+		depositMsg = null;
+		try {
+			const res = await fetch('/api/savings/deposit/simulate', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					reserve: depositTarget.refs.reserve,
+					market: depositTarget.refs.market,
+					assetMint: depositTarget.refs.assetMint,
+					asset: depositTarget.asset,
+					amount: depositAmount
+				})
+			});
+			const body = await res.json();
+			if (!res.ok || body?.ok === false) {
+				depositPhase = 'error';
+				depositMsg = body?.error ?? `simulate failed (${res.status})`;
+				return;
+			}
+			depositPhase = 'ready';
+			depositMsg = body?.message ?? 'Deposit simulated successfully on mainnet.';
+		} catch (err) {
+			depositPhase = 'error';
+			depositMsg = err instanceof Error ? err.message : String(err);
+		}
+	}
+
+	// --- Cluster toggle (§18): Mainnet (savings-first) ↔ Devnet (signing test). --
 	type DevnetToken = { mint: string; uiAmount: number; decimals: number };
 	type DevnetBalance = { address: string; lamports: number; sol: number; tokens: DevnetToken[] };
 
@@ -30,14 +88,12 @@
 	let devnetError = $state<string | null>(null);
 	let copied = $state(false);
 
-	/** Known devnet mints → display symbol; falls back to a truncated mint. */
 	const DEVNET_MINTS: Record<string, string> = {
 		'4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU': 'USDC'
 	};
 	function tokenLabel(mint: string): string {
 		return DEVNET_MINTS[mint] ?? `${mint.slice(0, 4)}…${mint.slice(-4)}`;
 	}
-
 	const explorerUrl = $derived(
 		`https://explorer.solana.com/address/${wallet.addressFull}?cluster=devnet`
 	);
@@ -57,32 +113,34 @@
 			devnetState = 'error';
 		}
 	}
-
 	function setCluster(next: 'mainnet' | 'devnet') {
 		cluster = next;
 		if (next === 'devnet' && devnetState === 'idle') void loadDevnet();
 	}
-
 	async function copyAddress() {
 		try {
 			await navigator.clipboard.writeText(wallet.addressFull);
 			copied = true;
 			setTimeout(() => (copied = false), 1400);
 		} catch {
-			/* clipboard blocked — no-op */
+			/* clipboard blocked */
 		}
 	}
+
+	const tabs = ['Portfolio', 'Collectibles'] as const;
+	let activeTab = $state<(typeof tabs)[number]>('Portfolio');
 </script>
 
-<main class="mx-auto max-w-[720px] px-10 py-12">
-	<!-- Cluster toggle (§18): Mainnet (SSR) ↔ Devnet (lazy). -->
-	<div class="mb-8 flex justify-center">
+<main class="mx-auto max-w-[760px] px-10 py-12">
+	<!-- Header: savings title + cluster toggle (dev affordance) -->
+	<div class="mb-8 flex items-center justify-between">
+		<h1 class="text-[22px] font-bold tracking-[-0.02em] text-ink">Savings</h1>
 		<div class="inline-flex items-center rounded-pill border border-border bg-surface p-1">
 			{#each clusters as c (c)}
 				<button
 					type="button"
 					onclick={() => setCluster(c)}
-					class="rounded-pill px-4 py-1.5 text-[13px] font-semibold capitalize transition-colors {cluster ===
+					class="rounded-pill px-3 py-1 text-[12px] font-semibold capitalize transition-colors {cluster ===
 					c
 						? c === 'devnet'
 							? 'bg-warning text-surface'
@@ -96,110 +154,173 @@
 	</div>
 
 	{#if cluster === 'mainnet'}
-	<!-- Total balance block -->
-	<section class="mb-10 flex flex-col items-center gap-1">
-		<div class="eyebrow text-muted">Total balance</div>
-		<div class="text-[56px] font-extrabold tracking-[-0.05em] text-ink">
-			{wallet.balanceUsd}
-		</div>
-		<div
-			class="text-sm font-medium {wallet.deltaTodayPct > 0
-				? 'text-positive'
-				: wallet.deltaTodayPct < 0
-					? 'text-negative'
-					: 'text-muted'}"
-		>
-			{wallet.deltaToday} ({wallet.deltaTodayPct.toFixed(2)}%) today
-		</div>
-	</section>
+		<!-- Balance -->
+		<section class="mb-6 flex flex-col items-center gap-1">
+			<div class="eyebrow text-muted">Total balance</div>
+			<div class="text-[48px] font-extrabold tracking-[-0.05em] text-ink">{wallet.balanceUsd}</div>
+			<div
+				class="text-sm font-medium {wallet.deltaTodayPct > 0
+					? 'text-positive'
+					: wallet.deltaTodayPct < 0
+						? 'text-negative'
+						: 'text-muted'}"
+			>
+				{wallet.deltaToday} ({wallet.deltaTodayPct.toFixed(2)}%) today
+			</div>
+		</section>
 
-	<!-- Action tiles -->
-	<section class="mb-10 grid grid-cols-4 gap-3">
-		{#each actions as action (action.label)}
+		<!-- Deposit / Withdraw -->
+		<section class="mb-10 grid grid-cols-2 gap-3">
+			<button
+				type="button"
+				onclick={() => catalogue && openDeposit(catalogue.defaults.find((d) => d.asset === 'USDC') ?? catalogue.defaults[0])}
+				disabled={catState !== 'loaded'}
+				class="rounded-[12px] bg-ink px-4 py-3 text-[14px] font-semibold text-surface transition-opacity hover:opacity-90 disabled:opacity-40"
+			>
+				Deposit
+			</button>
 			<button
 				type="button"
 				disabled
-				class="flex cursor-not-allowed flex-col items-center gap-2 rounded-[14px] border border-border bg-surface px-4 py-5 text-ink opacity-90 transition-opacity hover:opacity-100"
+				class="rounded-[12px] border border-border bg-surface px-4 py-3 text-[14px] font-semibold text-muted"
 			>
-				<svg
-					width="20"
-					height="20"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-					stroke-linecap="round"
-					stroke-linejoin="round"
-				>
-					{#if action.icon === 'dollar'}
-						<line x1="12" y1="2" x2="12" y2="22" />
-						<path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-					{:else if action.icon === 'swap'}
-						<path d="M3 7h13l-3-3" />
-						<path d="M21 17H8l3 3" />
-					{:else if action.icon === 'send'}
-						<path d="m22 2-7 20-4-9-9-4Z" />
-						<path d="M22 2 11 13" />
-					{:else if action.icon === 'receive'}
-						<path d="M12 5v14" />
-						<path d="m19 12-7 7-7-7" />
-					{/if}
-				</svg>
-				<span class="text-sm font-semibold">{action.label}</span>
+				Withdraw
 			</button>
-		{/each}
-	</section>
+		</section>
 
-	<!-- Tab strip -->
-	<section class="mb-6 flex gap-6 border-b border-border">
-		{#each tabs as tab (tab)}
-			<button
-				type="button"
-				onclick={() => (activeTab = tab)}
-				class="pb-3 text-sm font-semibold transition-colors {activeTab === tab
-					? 'border-b-2 border-ink text-ink -mb-px'
-					: 'text-muted hover:text-ink'}"
-			>
-				{tab}
-			</button>
-		{/each}
-	</section>
+		<!-- Your savings (the two Main Market one-click defaults) -->
+		<section class="mb-10">
+			<div class="mb-3 flex items-baseline justify-between">
+				<h2 class="text-[15px] font-bold text-ink">Your savings options</h2>
+				<span class="text-[12px] text-muted">SOL + USDC · pre-curated</span>
+			</div>
 
-	<!-- Tab content -->
-	{#if activeTab === 'Tokens'}
-		<section class="flex flex-col">
-			{#each wallet.tokens as token (token.symbol)}
-				<div class="flex items-center gap-4 border-b border-border py-4 last:border-b-0">
-					<span
-						class="flex h-9 w-9 items-center justify-center rounded-full bg-bg text-sm font-bold text-ink"
-					>
-						{token.symbol.charAt(0)}
-					</span>
-					<div class="flex flex-1 flex-col">
-						<span class="text-[15px] font-semibold text-ink">{token.symbol}</span>
-						<span class="text-xs text-muted">{token.name}</span>
-					</div>
-					<div class="text-xs text-muted">{token.amount}</div>
-					<div class="flex w-24 flex-col items-end">
-						<span class="text-[15px] font-bold text-ink">{token.usdValue}</span>
-						<span
-							class="text-xs font-medium {token.deltaPct > 0
-								? 'text-positive'
-								: token.deltaPct < 0
-									? 'text-negative'
-									: 'text-muted'}"
-						>
-							{token.deltaPct > 0 ? '+' : ''}{token.deltaPct.toFixed(2)}%
-						</span>
-					</div>
+			{#if catState === 'loading'}
+				<div class="grid grid-cols-2 gap-4">
+					{#each [0, 1] as i (i)}
+						<div class="h-[188px] animate-pulse rounded-card border border-border bg-surface"></div>
+					{/each}
 				</div>
+			{:else if catState === 'error'}
+				<div class="rounded-card border border-border bg-surface p-6 text-[13px] text-negative">
+					Couldn't load the savings catalogue. Refresh to retry.
+				</div>
+			{:else if catalogue}
+				<div class="grid grid-cols-2 gap-4">
+					{#each catalogue.defaults as card (card.id)}
+						<SavingsCard {card} variant="default" onDeposit={openDeposit} />
+					{/each}
+				</div>
+			{/if}
+
+			<div class="mt-3 flex gap-3">
+				<button
+					type="button"
+					disabled
+					class="flex-1 rounded-[10px] border border-border bg-surface px-3 py-2 text-[12.5px] font-semibold text-muted"
+				>
+					Manage savings accounts — soon
+				</button>
+				<button
+					type="button"
+					disabled
+					class="flex-1 rounded-[10px] border border-dashed border-border bg-transparent px-3 py-2 text-[12.5px] font-semibold text-muted"
+				>
+					+ Create savings account — soon
+				</button>
+			</div>
+		</section>
+
+		<!-- Portfolio / Collectibles -->
+		<section class="mb-6 flex gap-6 border-b border-border">
+			{#each tabs as tab (tab)}
+				<button
+					type="button"
+					onclick={() => (activeTab = tab)}
+					class="pb-3 text-sm font-semibold transition-colors {activeTab === tab
+						? '-mb-px border-b-2 border-ink text-ink'
+						: 'text-muted hover:text-ink'}"
+				>
+					{tab}
+				</button>
 			{/each}
 		</section>
-	{:else}
-		<section class="flex h-40 items-center justify-center text-sm text-muted">
-			Coming soon
+
+		{#if activeTab === 'Portfolio'}
+			<section class="mb-10 flex flex-col">
+				{#if wallet.tokens.length}
+					{#each wallet.tokens as token (token.symbol)}
+						<div class="flex items-center gap-4 border-b border-border py-4 last:border-b-0">
+							<span
+								class="flex h-9 w-9 items-center justify-center rounded-full bg-bg text-sm font-bold text-ink"
+							>
+								{token.symbol.charAt(0)}
+							</span>
+							<div class="flex flex-1 flex-col">
+								<span class="text-[15px] font-semibold text-ink">{token.symbol}</span>
+								<span class="text-xs text-muted">{token.name}</span>
+							</div>
+							<div class="text-xs text-muted">{token.amount}</div>
+							<div class="flex w-24 flex-col items-end">
+								<span class="text-[15px] font-bold text-ink">{token.usdValue}</span>
+								<span
+									class="text-xs font-medium {token.deltaPct > 0
+										? 'text-positive'
+										: token.deltaPct < 0
+											? 'text-negative'
+											: 'text-muted'}"
+								>
+									{token.deltaPct > 0 ? '+' : ''}{token.deltaPct.toFixed(2)}%
+								</span>
+							</div>
+						</div>
+					{/each}
+				{:else}
+					<div class="flex h-32 items-center justify-center text-sm text-muted">
+						No holdings yet — deposit into a savings option to get started.
+					</div>
+				{/if}
+			</section>
+		{:else}
+			<section class="mb-10 flex h-32 items-center justify-center text-sm text-muted">
+				Collectibles — coming soon
+			</section>
+		{/if}
+
+		<!-- Browse rates / Discover -->
+		<section class="mb-10">
+			<button
+				type="button"
+				onclick={() => (showDiscover = !showDiscover)}
+				class="flex w-full items-center justify-between border-b border-border pb-3 text-left"
+			>
+				<span class="text-[15px] font-bold text-ink">Browse rates</span>
+				<span class="text-[12.5px] font-medium text-muted">
+					{catalogue ? `${browseCards.length} more opportunities` : ''} · {showDiscover ? 'Hide' : 'Discover'}
+				</span>
+			</button>
+
+			{#if showDiscover}
+				<div class="mt-4 flex flex-col gap-2.5">
+					{#if catState === 'loaded' && catalogue}
+						{#each browseCards as card (card.id)}
+							<SavingsCard {card} variant="browse" />
+						{/each}
+					{:else if catState === 'loading'}
+						<div class="py-6 text-center text-[13px] text-muted">Loading opportunities…</div>
+					{/if}
+				</div>
+			{/if}
 		</section>
-	{/if}
+
+		<!-- Advanced — autonomous agent signing (Slice 2 / senior accounts) -->
+		<section class="mt-2">
+			<div class="eyebrow mb-3 text-muted">Advanced</div>
+			<AgentSigningCard
+				authKeyId={data.agentSigning.authKeyId}
+				policyId={data.agentSigning.policyId}
+			/>
+		</section>
 	{:else}
 		<!-- Devnet panel — test-environment balance for the signing ladder (§18). -->
 		<section class="mb-8 flex flex-col items-center gap-2">
@@ -235,7 +356,6 @@
 		</section>
 
 		{#if devnetState === 'loaded' && devnet}
-			<!-- Address + copy/explorer -->
 			<section
 				class="mb-4 flex items-center justify-between gap-3 rounded-card border border-border bg-surface p-5"
 			>
@@ -264,7 +384,6 @@
 				</div>
 			</section>
 
-			<!-- Devnet SPL holdings -->
 			<section class="mb-4 rounded-card border border-border bg-surface p-2">
 				{#if devnet.tokens.length}
 					{#each devnet.tokens as t (t.mint)}
@@ -290,7 +409,6 @@
 				{/if}
 			</section>
 
-			<!-- Faucet + refresh -->
 			<div class="flex items-center justify-between gap-3 px-1">
 				<a
 					href="https://faucet.solana.com/"
@@ -310,19 +428,68 @@
 			</div>
 		{/if}
 	{/if}
-
-	<!-- Agent signing — the live policy-scoped delegation opt-in (§18). -->
-	<div class="mt-12">
-		<AgentSigningCard authKeyId={data.agentSigning.authKeyId} policyId={data.agentSigning.policyId} />
-	</div>
-
-	<!-- Connectors empty state — the broader future (more venues). -->
-	<section class="mt-4 rounded-card border border-dashed border-border bg-transparent p-6">
-		<div class="eyebrow mb-2 text-muted">Coming soon</div>
-		<h3 class="mb-1.5 text-[17px] font-bold text-ink">More connectors</h3>
-		<p class="text-[13px] leading-relaxed text-muted">
-			Policy-scoped agent signers across Drift, Jupiter, Marginfi, and more — each with its own
-			guardrails.
-		</p>
-	</section>
 </main>
+
+<!-- Deposit modal (Slice 1: Main Market reserve supply, simulate-only) -->
+{#if depositTarget}
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4"
+		role="button"
+		tabindex="-1"
+		onclick={closeDeposit}
+		onkeydown={(e) => e.key === 'Escape' && closeDeposit()}
+	>
+		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+		<div
+			class="w-full max-w-[400px] rounded-card border border-border bg-surface p-6 shadow-card"
+			role="dialog"
+			aria-modal="true"
+			tabindex="-1"
+			onclick={(e) => e.stopPropagation()}
+		>
+			<div class="mb-1 flex items-center justify-between">
+				<h3 class="text-[17px] font-bold text-ink">Deposit {depositTarget.asset}</h3>
+				<button type="button" onclick={closeDeposit} class="text-[13px] text-muted hover:text-ink"
+					>Close</button
+				>
+			</div>
+			<p class="mb-4 text-[12.5px] text-muted">
+				{depositTarget.venue} · {(depositTarget.apy * 100).toFixed(2)}% APY
+			</p>
+
+			<label class="mb-1.5 block text-[12px] font-semibold text-muted" for="dep-amt">Amount</label>
+			<div class="mb-4 flex items-center gap-2 rounded-[10px] border border-border px-3 py-2.5">
+				<input
+					id="dep-amt"
+					bind:value={depositAmount}
+					inputmode="decimal"
+					class="w-full bg-transparent text-[15px] font-semibold text-ink outline-none"
+				/>
+				<span class="text-[13px] font-semibold text-muted">{depositTarget.asset}</span>
+			</div>
+
+			<button
+				type="button"
+				onclick={simulateDeposit}
+				disabled={depositPhase === 'simulating'}
+				class="w-full rounded-[10px] bg-ink px-4 py-2.5 text-[13px] font-semibold text-surface transition-opacity hover:opacity-90 disabled:opacity-50"
+			>
+				{depositPhase === 'simulating' ? 'Simulating…' : 'Review deposit'}
+			</button>
+
+			{#if depositPhase === 'ready'}
+				<p class="mt-3 rounded-[8px] bg-positive/10 px-3 py-2 text-[12px] text-positive">
+					✓ {depositMsg}
+				</p>
+			{:else if depositPhase === 'error'}
+				<p class="mt-3 rounded-[8px] bg-negative/10 px-3 py-2 text-[12px] text-negative">
+					{depositMsg}
+				</p>
+			{:else}
+				<p class="mt-3 text-[11.5px] text-muted">
+					We simulate the on-chain deposit first — no funds move until you confirm.
+				</p>
+			{/if}
+		</div>
+	</div>
+{/if}
