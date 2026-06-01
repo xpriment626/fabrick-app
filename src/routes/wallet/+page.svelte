@@ -4,11 +4,16 @@
 	import type { OpportunityCard, SavingsCatalogue } from '$lib/savings/types';
 	import AgentSigningCard from '$lib/components/AgentSigningCard.svelte';
 	import SavingsCard from '$lib/components/SavingsCard.svelte';
+	import ReceiveModal from '$lib/components/ReceiveModal.svelte';
+	import SendModal from '$lib/components/SendModal.svelte';
 
 	type Props = { data: PageData };
 	let { data }: Props = $props();
 
 	const wallet = $derived(data.walletSnapshot);
+
+	// Wallet-standard Deposit (receive: QR + copy) / Withdraw (send: recipient).
+	let walletModal = $state<'receive' | 'send' | null>(null);
 
 	// --- Savings catalogue (design §20) — public, fund-independent, client-fetched.
 	let catalogue = $state<SavingsCatalogue | null>(null);
@@ -169,20 +174,19 @@
 			</div>
 		</section>
 
-		<!-- Deposit / Withdraw -->
+		<!-- Deposit (receive: QR + copy) / Withdraw (send: recipient) — wallet standards -->
 		<section class="mb-10 grid grid-cols-2 gap-3">
 			<button
 				type="button"
-				onclick={() => catalogue && openDeposit(catalogue.defaults.find((d) => d.asset === 'USDC') ?? catalogue.defaults[0])}
-				disabled={catState !== 'loaded'}
-				class="rounded-[12px] bg-ink px-4 py-3 text-[14px] font-semibold text-surface transition-opacity hover:opacity-90 disabled:opacity-40"
+				onclick={() => (walletModal = 'receive')}
+				class="rounded-[12px] bg-ink px-4 py-3 text-[14px] font-semibold text-surface transition-opacity hover:opacity-90"
 			>
 				Deposit
 			</button>
 			<button
 				type="button"
-				disabled
-				class="rounded-[12px] border border-border bg-surface px-4 py-3 text-[14px] font-semibold text-muted"
+				onclick={() => (walletModal = 'send')}
+				class="rounded-[12px] border border-border bg-surface px-4 py-3 text-[14px] font-semibold text-ink transition-colors hover:bg-bg"
 			>
 				Withdraw
 			</button>
@@ -430,7 +434,14 @@
 	{/if}
 </main>
 
-<!-- Deposit modal (Slice 1: Main Market reserve supply, simulate-only) -->
+<!-- Wallet-standard Deposit (receive) / Withdraw (send) -->
+{#if walletModal === 'receive'}
+	<ReceiveModal address={wallet.addressFull} onClose={() => (walletModal = null)} />
+{:else if walletModal === 'send'}
+	<SendModal owner={wallet.addressFull} onClose={() => (walletModal = null)} />
+{/if}
+
+<!-- Savings deposit modal (Slice 1: Main Market reserve supply, simulate-only) -->
 {#if depositTarget}
 	<div
 		class="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4"
