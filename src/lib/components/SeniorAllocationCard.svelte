@@ -12,8 +12,10 @@
 		allocation: AllocationDecision;
 		intendedAmountUsd?: number;
 		riskPreference?: string;
+		/** Hide the "Fund this strategy" CTA (e.g. when shown as a builder preview). */
+		showFundButton?: boolean;
 	};
-	let { allocation, intendedAmountUsd, riskPreference }: Props = $props();
+	let { allocation, intendedAmountUsd, riskPreference, showFundButton = true }: Props = $props();
 
 	const PRODUCT: Record<string, string> = { lend: 'Lend', earn: 'Earn', multiply: 'Multiply' };
 	// quiet palette for the weight segments
@@ -85,11 +87,13 @@
 		<p class="text-[12.5px] leading-relaxed text-muted">{allocation.rationale}</p>
 	</div>
 
-	<button
-		type="button"
-		disabled
-		class="w-full rounded-[10px] border border-border bg-surface px-4 py-2.5 text-[13px] font-semibold text-muted"
-	>
-		Fund this strategy — coming soon
-	</button>
+	{#if showFundButton}
+		<button
+			type="button"
+			disabled
+			class="w-full rounded-[10px] border border-border bg-surface px-4 py-2.5 text-[13px] font-semibold text-muted"
+		>
+			Fund this strategy — coming soon
+		</button>
+	{/if}
 </section>

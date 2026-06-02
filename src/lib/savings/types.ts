@@ -55,11 +55,17 @@ export type SavingsCatalogue = {
 export type SavingsAccountType = 'junior' | 'senior';
 export type RiskPreference = 'conservative' | 'balanced' | 'aggressive';
 
+/** Directional steer applied on reroll — the revealed-preference signal. Each
+ *  one deterministically shifts the allocation; they accumulate across rerolls. */
+export type SeniorNudge = 'more_conservative' | 'more_aggressive' | 'fewer_pools' | 'less_sol';
+
 /** The senior-account config the user submits — the "mandate" the agents reason against. */
 export type SeniorMandate = {
 	selectedPoolIds: string[];
 	intendedAmountUsd: number;
 	riskPreference: RiskPreference;
+	/** The accumulated reroll steers that produced the accepted allocation. */
+	nudges?: SeniorNudge[];
 };
 
 export type AllocationWeight = {
