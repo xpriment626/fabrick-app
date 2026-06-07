@@ -18,10 +18,8 @@ import { supabaseAdmin } from '$lib/server/supabase';
 const TABLES = [
 	'users',
 	'user_settings',
-	'research_sessions',
-	'research_runs',
-	'research_turns',
-	'research_citations'
+	'savings_accounts',
+	'savings_events'
 ] as const;
 
 export const GET: RequestHandler = async () => {

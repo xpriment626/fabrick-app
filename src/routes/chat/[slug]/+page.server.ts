@@ -1,32 +1,6 @@
-import { error, redirect } from '@sveltejs/kit';
+import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { loadChat, listFleetRunsForChat } from '$lib/server/db/chats';
 
-export const load: PageServerLoad = async ({ params, url, locals }) => {
-	if (!locals.user) throw redirect(302, '/');
-
-	const chat = await loadChat(params.slug);
-	if (!chat) throw error(404, `chat not found: ${params.slug}`);
-	if (chat.userId !== locals.user.id) throw error(403, 'not your chat');
-
-	// Recents now come from the root +layout.server.ts (global sidebar
-	// reads them via $page.data). No per-route fetch needed here.
-
-	// Surface fleet runs dispatched from this chat so the user can
-	// navigate back into them. Failure is non-fatal — empty list just
-	// hides the section.
-	const fleetRuns = await listFleetRunsForChat(chat.id).catch((err) => {
-		console.warn('[chat/load] listFleetRunsForChat failed:', err);
-		return [];
-	});
-
-	return {
-		chat,
-		fleetRuns,
-		// If `?autosend=1`, the client knows the last user turn is fresh and
-		// needs to be sent to the model. Legacy flag (the ambient new-chat
-		// flow that set it was removed in §17); nothing sets it today, but the
-		// handling is harmless + defensive for any seeded-first-turn caller.
-		autosend: url.searchParams.get('autosend') === '1'
-	};
+export const load: PageServerLoad = () => {
+	throw redirect(302, '/wallet');
 };

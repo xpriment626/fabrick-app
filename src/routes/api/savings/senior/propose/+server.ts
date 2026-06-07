@@ -1,12 +1,11 @@
 /**
  * POST /api/savings/senior/propose — propose a weighted allocation for a senior
- * account (design.md §18 reroll model, §20 Slice 2). PREVIEW ONLY — does NOT
- * persist the account; the user accepts via POST /api/savings/accounts.
+ * account. PREVIEW ONLY — does NOT persist the account; the user accepts via
+ * POST /api/savings/accounts.
  *
- * Reroll = re-calling this with an accumulated `nudges` array. The allocator is
- * deterministic (same inputs → same weights); the LLM only narrates. Each call
- * logs a behavioral event: senior_proposed (no nudges) or senior_rerolled (with
- * the latest direction) — the revealed-preference signal.
+ * Reroll = re-calling this with an accumulated `nudges` array. Allocation math
+ * and preview narration come from Savings MCP; Fabrick logs the user behavior
+ * and persists only after explicit acceptance.
  *
  * Body: { selectedPoolIds: string[], amountUsd: number, riskPreference, nudges? }
  * Response: { allocation: AllocationDecision, mandate: SeniorMandate }
@@ -14,14 +13,12 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getSavingsCatalogue } from '$lib/server/kamino/catalogue';
-import { proposeSeniorAllocation } from '$lib/server/savings';
+import { getSavingsCatalogue, proposeSavingsAllocation } from '$lib/server/savings-mcp';
 import { logSavingsEvent } from '$lib/server/savings-events';
-import { resolveOpenrouterKey } from '$lib/server/chat-model';
 import type { OpportunityCard, RiskPreference, SeniorMandate, SeniorNudge } from '$lib/savings/types';
 
 const RISK: RiskPreference[] = ['conservative', 'balanced', 'aggressive'];
-const NUDGES: SeniorNudge[] = ['more_conservative', 'more_aggressive', 'fewer_pools', 'less_sol'];
+const NUDGES: SeniorNudge[] = ['more_conservative', 'more_aggressive', 'fewer_pools'];
 
 export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) throw error(401, 'sign in required');
@@ -54,15 +51,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!Number.isFinite(amountUsd) || amountUsd <= 0) throw error(400, 'amountUsd must be positive');
 
 	const cat = await getSavingsCatalogue();
-	const all: OpportunityCard[] = [...cat.defaults, ...cat.lend, ...cat.earn, ...cat.multiply];
+	const all: OpportunityCard[] = [...cat.defaults, ...cat.lend, ...cat.earn];
 	const byId = new Map(all.map((c) => [c.id, c]));
 	const pools = selectedPoolIds.map((id) => byId.get(id)).filter((c): c is OpportunityCard => Boolean(c));
 	if (pools.length < 2) throw error(400, 'selected pools not found in the current catalogue');
 
-	const apiKey = await resolveOpenrouterKey(userId);
-
 	try {
-		const allocation = await proposeSeniorAllocation({ apiKey, pools, amountUsd, riskPreference, nudges });
+		const allocation = await proposeSavingsAllocation({
+			opportunityIds: pools.map((pool) => pool.mcpOpportunityId),
+			amountUsd,
+			riskPreference,
+			nudges
+		});
 		const mandate: SeniorMandate = {
 			selectedPoolIds: pools.map((p) => p.id),
 			intendedAmountUsd: amountUsd,

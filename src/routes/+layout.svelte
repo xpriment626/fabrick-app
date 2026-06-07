@@ -7,9 +7,8 @@
 	type Props = { data: LayoutData; children: import('svelte').Snippet };
 	let { data, children }: Props = $props();
 
-	// §17: no global ambient chat bar. A conversation is anchored — it
-	// lives inside a News story (/discover/[slug]) or a Fleet run, each of
-	// which ships its own composer. There is no unanchored entry point.
+	// The active shell is savings-first. Broad research/chat surfaces are
+	// preserved on the deep-research branch and disabled from navigation here.
 </script>
 
 <Sidebar recents={data.recents} />

@@ -6,12 +6,12 @@
  * zero-balance user can browse opportunities + risk synthesis without committing
  * any funds — the product's front door. Cached server-side (~daily-refresh knob).
  *
- * Response: SavingsCatalogue { defaults, lend, earn, multiply, counts, generatedAt }
+ * Response: SavingsCatalogue { defaults, lend, earn, counts, generatedAt }
  */
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getSavingsCatalogue } from '$lib/server/kamino/catalogue';
+import { getSavingsCatalogue } from '$lib/server/savings-mcp';
 
 export const GET: RequestHandler = async ({ url }) => {
 	const force = url.searchParams.get('refresh') === '1';

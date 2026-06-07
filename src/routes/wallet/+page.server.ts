@@ -6,10 +6,6 @@
  * the sign-in entry point). If they're authed but the wallet hasn't
  * been provisioned yet (rare — Privy auto-creates on first sign-in),
  * fall back to the placeholder so the page still renders.
- *
- * The DeFi / NFTs / Activity tabs stay "Coming soon" until the
- * `onchain-researcher` agent goes live in build-order step 4 and starts
- * answering position queries via TopLedger's MCP server.
  */
 
 import { redirect } from '@sveltejs/kit';

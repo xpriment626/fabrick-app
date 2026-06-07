@@ -67,9 +67,7 @@
 	let catState = $state<'loading' | 'loaded' | 'error'>('loading');
 	let showDiscover = $state(false);
 
-	const browseCards = $derived<OpportunityCard[]>(
-		catalogue ? [...catalogue.lend, ...catalogue.earn, ...catalogue.multiply] : []
-	);
+	const browseCards = $derived<OpportunityCard[]>(catalogue ? [...catalogue.lend, ...catalogue.earn] : []);
 
 	onMount(async () => {
 		try {
@@ -91,7 +89,7 @@
 
 	function openDeposit(card: OpportunityCard) {
 		depositTarget = card;
-		depositAmount = card.asset === 'USDC' ? '1' : '0.05';
+		depositAmount = '1';
 		depositPhase = 'idle';
 		depositMsg = null;
 	}
@@ -112,7 +110,8 @@
 					market: depositTarget.refs.market,
 					assetMint: depositTarget.refs.assetMint,
 					asset: depositTarget.asset,
-					amount: depositAmount
+					amount: depositAmount,
+					opportunityId: depositTarget.mcpOpportunityId
 				})
 			});
 			const body = await res.json();
@@ -258,7 +257,7 @@
 					>
 						<span class="text-[15px] font-bold text-ink">Junior</span>
 						<span class="text-[12.5px] leading-relaxed text-muted">
-							One-click into a single blue-chip pool (Main Market USDC or SOL). The simplest save.
+							One-click into a single USDC opportunity. The simplest save.
 						</span>
 						<span class="mt-1 text-[12px] font-semibold text-ink">{juniorBusy ? 'Creating…' : 'Create junior →'}</span>
 					</button>
@@ -269,7 +268,7 @@
 					>
 						<span class="text-[15px] font-bold text-ink">Senior</span>
 						<span class="text-[12.5px] leading-relaxed text-muted">
-							Compose multiple pools; Fabrick's agents propose a custom weighting + rebalancing strategy.
+							Compose multiple USDC opportunities with a Savings MCP allocation preview.
 						</span>
 						<span class="mt-1 text-[12px] font-semibold text-ink">Compose senior →</span>
 					</button>
@@ -290,8 +289,8 @@
 				>
 					<div class="text-[17px] font-bold text-ink">No savings account yet</div>
 					<p class="max-w-[380px] text-[13px] leading-relaxed text-muted">
-						Open a savings account to start earning on your SOL or USDC — a simple one-click pool, or a
-						custom multi-pool strategy composed by Fabrick's agents.
+						Open a USDC savings account — a simple one-click opportunity, or a custom multi-venue
+						strategy composed from Savings MCP analytics.
 					</p>
 					<button
 						type="button"
@@ -329,11 +328,11 @@
 				{#if hasJunior}
 					<div class="mb-2 flex items-baseline justify-between">
 						<h3 class="text-[14px] font-semibold text-ink">Junior · one-click pools</h3>
-						<span class="text-[12px] text-muted">SOL + USDC · pre-curated</span>
+						<span class="text-[12px] text-muted">USDC · Savings MCP</span>
 					</div>
 					{#if catState === 'loading'}
-						<div class="grid grid-cols-2 gap-4">
-							{#each [0, 1] as i (i)}
+						<div class="grid grid-cols-1 gap-4">
+							{#each [0] as i (i)}
 								<div class="h-[188px] animate-pulse rounded-card border border-border bg-surface"></div>
 							{/each}
 						</div>
@@ -342,7 +341,7 @@
 							Couldn't load the catalogue.
 						</div>
 					{:else if catalogue}
-						<div class="grid grid-cols-2 gap-4">
+						<div class="grid grid-cols-1 gap-4">
 							{#each catalogue.defaults as card (card.id)}
 								<SavingsCard {card} variant="default" onDeposit={openDeposit} />
 							{/each}

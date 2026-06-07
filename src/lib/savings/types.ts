@@ -1,21 +1,27 @@
 /**
- * Savings catalogue contract (design.md §20). Client-safe — shared by the
- * server builder (`$lib/server/kamino/catalogue`) and the UI. Lives outside
- * `$lib/server` so Svelte components can import these types freely.
+ * Savings catalogue contract. Client-safe — shared by the Savings MCP adapter
+ * and the UI. Lives outside `$lib/server` so Svelte components can import these
+ * types freely.
  */
 
-export type SavingsProduct = 'lend' | 'earn' | 'multiply';
-export type SavingsAsset = 'SOL' | 'USDC';
+export type SavingsProduct = 'lend' | 'earn';
+export type SavingsAsset = 'USDC';
 export type RiskTier = 'conservative' | 'moderate' | 'elevated' | 'high';
+export type IntegrationStatus =
+	| 'market_data_only'
+	| 'tx_blueprint_known'
+	| 'simulation_supported'
+	| 'execution_supported';
 
 export type OpportunityCard = {
-	/** Stable id: `${product}:${reserve|vault|depositReserve}`. */
+	/** Stable Savings MCP opportunity id. */
 	id: string;
+	mcpOpportunityId: string;
 	product: SavingsProduct;
 	asset: SavingsAsset;
-	/** Headline, e.g. "USDC", a vault name, or "SOL → USDC". */
+	/** Headline, e.g. "USDC Main Market" or a vault name. */
 	title: string;
-	/** Where it lives: market name / "Kamino Earn" / "Multiply". */
+	/** Where it lives: venue/protocol display label. */
 	venue: string;
 	/** APY as a fraction (0.042 = 4.2%). */
 	apy: number;
@@ -25,10 +31,13 @@ export type OpportunityCard = {
 	riskTier: RiskTier;
 	/** One-line plain-language risk synthesis. */
 	riskSynthesis: string;
-	/** True for the two Main Market reserves (the one-click defaults). */
+	/** True for primary one-click cards. */
 	isDefault: boolean;
-	/** Slice 1: only the Main Market defaults can actually be deposited into. */
+	/** True only when Fabrick has an app-side USDC deposit path for this opportunity. */
 	depositable: boolean;
+	integrationStatus: IntegrationStatus;
+	limitations: string[];
+	availableFollowups: string[];
 	refs: {
 		market?: string;
 		reserve?: string;
@@ -40,13 +49,12 @@ export type OpportunityCard = {
 };
 
 export type SavingsCatalogue = {
-	/** The two Main Market one-click cards (USDC, SOL). */
+	/** Primary one-click USDC cards. */
 	defaults: OpportunityCard[];
-	/** Rest of the curated LEND surface (excludes defaults). */
+	/** Rest of the curated lending surface (excludes defaults). */
 	lend: OpportunityCard[];
 	earn: OpportunityCard[];
-	multiply: OpportunityCard[];
-	counts: { defaults: number; lend: number; earn: number; multiply: number; total: number };
+	counts: { defaults: number; lend: number; earn: number; total: number };
 	generatedAt: string;
 };
 
@@ -57,7 +65,7 @@ export type RiskPreference = 'conservative' | 'balanced' | 'aggressive';
 
 /** Directional steer applied on reroll — the revealed-preference signal. Each
  *  one deterministically shifts the allocation; they accumulate across rerolls. */
-export type SeniorNudge = 'more_conservative' | 'more_aggressive' | 'fewer_pools' | 'less_sol';
+export type SeniorNudge = 'more_conservative' | 'more_aggressive' | 'fewer_pools';
 
 /** The senior-account config the user submits — the "mandate" the agents reason against. */
 export type SeniorMandate = {

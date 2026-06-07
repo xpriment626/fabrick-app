@@ -4,9 +4,8 @@
  * `sub` claim is the user's Privy DID.
  *
  * If the cookie is missing / expired / tampered, `locals.user` stays
- * null and the request is treated as unauthenticated. Route handlers
- * decide what to do with that (most chat routes require auth; the
- * home page tolerates anonymous browsing).
+ * null and the request is treated as unauthenticated. Public savings catalogue
+ * pages tolerate anonymous browsing; wallet/account routes require auth.
  */
 
 import type { Handle } from '@sveltejs/kit';

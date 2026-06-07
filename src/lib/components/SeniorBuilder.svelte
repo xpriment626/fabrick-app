@@ -2,9 +2,9 @@
 	SeniorBuilder (§18 reroll model, §20 Slice 2) — compose a senior account.
 
 	Flow: pick pools + amount + risk preference → Compose → a PREVIEW of the
-	agent-proposed allocation. From the preview the user can Accept & save, or
-	REROLL with a direction (more conservative / aggressive / fewer pools / less
-	SOL). Reroll is a *steer*, not a reseed: it appends a nudge and re-proposes
+	Savings MCP-proposed allocation. From the preview the user can Accept & save,
+	or REROLL with a direction (more conservative / aggressive / fewer pools).
+	Reroll is a *steer*, not a reseed: it appends a nudge and re-proposes
 	with the accumulated nudges (deterministic allocator). Accept persists the
 	account with its mandate (incl. nudges) + accepted allocation.
 -->
@@ -30,8 +30,7 @@
 	const pools = $derived<OpportunityCard[]>([
 		...catalogue.defaults,
 		...catalogue.lend,
-		...catalogue.earn,
-		...catalogue.multiply
+		...catalogue.earn
 	]);
 
 	let selected = $state<string[]>([]);
@@ -43,7 +42,7 @@
 	let errorMsg = $state<string | null>(null);
 	let preview = $state<{ allocation: AllocationDecision; mandate: SeniorMandate } | null>(null);
 
-	const PRODUCT: Record<string, string> = { lend: 'Lend', earn: 'Earn', multiply: 'Multiply' };
+	const PRODUCT: Record<string, string> = { lend: 'Lend', earn: 'Earn' };
 	const TIER: Record<string, string> = {
 		conservative: 'text-positive',
 		moderate: 'text-ink',
@@ -53,14 +52,12 @@
 	const NUDGE_OPTIONS: { key: SeniorNudge; label: string }[] = [
 		{ key: 'more_conservative', label: '↓ More conservative' },
 		{ key: 'more_aggressive', label: '↑ More aggressive' },
-		{ key: 'fewer_pools', label: 'Fewer pools' },
-		{ key: 'less_sol', label: 'Less SOL' }
+		{ key: 'fewer_pools', label: 'Fewer pools' }
 	];
 	const NUDGE_LABEL: Record<SeniorNudge, string> = {
 		more_conservative: 'more conservative',
 		more_aggressive: 'more aggressive',
-		fewer_pools: 'fewer pools',
-		less_sol: 'less SOL'
+		fewer_pools: 'fewer pools'
 	};
 
 	const amountValid = $derived(parseFloat(amount) > 0);
@@ -159,7 +156,7 @@
 	{:else if preview}
 		<!-- PREVIEW: the proposed allocation + steer / accept -->
 		<p class="mb-3 text-[12.5px] text-muted">
-			Composed by Fabrick's agents. Steer it, or accept to save — nothing is funded yet.
+			Composed from Savings MCP analytics. Steer it, or accept to save — nothing is funded yet.
 		</p>
 
 		<SeniorAllocationCard
@@ -216,8 +213,8 @@
 	{:else}
 		<!-- COMPOSE: pick pools + amount + risk preference -->
 		<p class="mb-4 text-[12.5px] text-muted">
-			Pick the pools to compose. Fabrick's agents assess their risk and propose a custom weighting +
-			rebalancing strategy for your deposit.
+			Pick the USDC opportunities to compose. Savings MCP proposes a custom weighting + rebalancing
+			strategy for your deposit.
 		</p>
 
 		<div class="mb-4">
@@ -280,7 +277,7 @@
 							>
 						</div>
 						<span class="shrink-0 text-[13px] font-bold text-ink">
-							{p.product === 'multiply' ? `~${p.leverage?.toFixed(1)}x` : `${(p.apy * 100).toFixed(2)}%`}
+							{(p.apy * 100).toFixed(2)}%
 						</span>
 					</button>
 				{/each}

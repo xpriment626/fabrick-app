@@ -12,8 +12,8 @@
 	  2. privy.user.get() → getUserEmbeddedSolanaWallet(user)
 	  3. addSessionSigners({client, wallet, signers:[{signer_id, override_policy_ids}]})
 
-	Needs a real client Privy session — works under `npm run dev:all:auth` +
-	real login (the dev bypass gives no client session).
+	Needs a real client Privy session — run the app with DEV_AUTH_PRIVY_DID
+	unset/blank and sign in normally. The dev bypass gives no client session.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -119,8 +119,8 @@
 	</div>
 
 	<p class="mb-4 text-[13px] leading-relaxed text-muted">
-		Let Fabrick rebalance your deposits across Kamino within a strict on-chain policy. Agents act on
-		your behalf — you keep custody and can revoke anytime.
+		Let Fabrick rebalance USDC savings within a strict on-chain policy. Allocation context comes
+		from Savings MCP; signing stays scoped to your embedded wallet.
 	</p>
 
 	{#if !configured}
@@ -132,8 +132,8 @@
 		<p class="text-[12.5px] text-muted">Checking wallet…</p>
 	{:else if phase === 'no-session'}
 		<p class="text-[12.5px] text-muted">
-			No wallet session. Run <code>npm run dev:all:auth</code> and sign in for real (the dev bypass
-			provides no client session).
+			No wallet session. Run <code>npm run dev</code> with <code>DEV_AUTH_PRIVY_DID</code> unset
+			and sign in for real.
 		</p>
 	{:else if phase === 'enabled'}
 		<div class="flex items-center justify-between gap-3">

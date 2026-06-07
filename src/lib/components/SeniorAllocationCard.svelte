@@ -1,5 +1,5 @@
 <!--
-	SeniorAllocationCard (§20 Slice 2) — renders an agent-proposed AllocationDecision
+	SeniorAllocationCard — renders a Savings MCP AllocationDecision
 	for a senior account: weighted multi-pool basket, blended APY, risk envelope,
 	rebalancing strategy, and rationale. Materially different from the junior
 	one-click card — this is a composed, generated strategy.
@@ -17,7 +17,7 @@
 	};
 	let { allocation, intendedAmountUsd, riskPreference, showFundButton = true }: Props = $props();
 
-	const PRODUCT: Record<string, string> = { lend: 'Lend', earn: 'Earn', multiply: 'Multiply' };
+	const PRODUCT: Record<string, string> = { lend: 'Lend', earn: 'Earn' };
 	// quiet palette for the weight segments
 	const SEG = ['bg-ink', 'bg-positive', 'bg-warning', 'bg-muted', 'bg-negative', 'bg-ink/60'];
 	const usd = (n: number) => `$${Math.round(n).toLocaleString()}`;

@@ -1,10 +1,10 @@
 /**
  * Savings-account persistence (design.md §20, Slice 2).
  *
- * User-scoped CRUD over the Supabase `savings_accounts` table. Mirrors the
- * chats pattern (lib/server/db/chats.ts): server-side via `supabaseAdmin`
- * (service_role) with explicit `user_id` filtering. RLS is enabled on the
- * table for defense-in-depth, but the app reads/writes as admin + user_id.
+ * User-scoped CRUD over the Supabase `savings_accounts` table. Reads and
+ * writes run server-side via `supabaseAdmin` with explicit `user_id`
+ * filtering. RLS is enabled on the table for defense-in-depth, but the app
+ * reads/writes as admin + user_id.
  *
  * An account is `junior` (single-pool one-click, no allocation) or `senior`
  * (multi-pool weighted basket with an agent-proposed allocation). Slice 2 is

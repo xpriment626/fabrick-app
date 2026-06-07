@@ -17,8 +17,7 @@
 
 	const PRODUCT_LABEL: Record<OpportunityCard['product'], string> = {
 		lend: 'Lend',
-		earn: 'Earn',
-		multiply: 'Multiply'
+		earn: 'Earn'
 	};
 	const TIER: Record<OpportunityCard['riskTier'], { label: string; cls: string }> = {
 		conservative: { label: 'Conservative', cls: 'bg-positive/12 text-positive' },
@@ -83,9 +82,7 @@
 			<span class="truncate text-[11.5px] text-muted">{card.riskSynthesis}</span>
 		</div>
 		<div class="flex shrink-0 flex-col items-end gap-1">
-			<span class="text-[15px] font-bold text-ink">
-				{card.product === 'multiply' ? `~${card.leverage?.toFixed(2)}x` : apyLabel}
-			</span>
+			<span class="text-[15px] font-bold text-ink">{apyLabel}</span>
 			<span class="rounded-pill px-2 py-0.5 text-[10px] font-semibold {tier.cls}">{tier.label}</span>
 		</div>
 	</div>

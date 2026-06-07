@@ -4,14 +4,10 @@
  * Uses the secret key (`sb_secret_*`, formerly `service_role`) which bypasses
  * RLS. Server-only — never import from any module that ships to the browser.
  *
- * Two reasons we run server-side as admin instead of as the authed user:
- *   1. Privy is the IdP, not Supabase Auth. Until step 3.5.b lands the
- *      JWT-minting bridge, there's no Supabase-compatible JWT to attach.
- *   2. Backend operations like the Privy webhook user upsert and BYOK key
- *      decryption (`get_openrouter_key`) need privileged access regardless.
- *
- * Per-request authed clients (using a minted Supabase JWT for RLS-enforced
- * client-side queries) come in step 3.5.b with the auth wiring.
+ * Backend writes such as Privy user upsert, savings-account persistence, and
+ * savings-event logging use explicit user_id filters and the service key.
+ * Per-request authed clients are still available when a route should respect
+ * Supabase RLS directly.
  */
 
 import { createClient } from '@supabase/supabase-js';
@@ -61,10 +57,8 @@ export const supabaseAdmin = createClient<Database>(
  * Supabase's request handler pulls the JWT into `request.jwt.claims`, and
  * RLS via `current_privy_user_id()` reads `sub` from there.
  *
- * Use this from any route handler that should respect RLS — chat
- * mutations, session reads, anything user-scoped. Reserve `supabaseAdmin`
- * for true backend operations (Privy webhook user upsert, BYOK key
- * decryption, agent-side reads with explicit user_id parameter).
+ * Use this from any route handler that should respect RLS directly. Reserve
+ * `supabaseAdmin` for backend operations with explicit user_id filtering.
  *
  * Note: anon key + JWT header is what the Supabase JS client expects for
  * authed requests. The anon key passes the API gateway; the JWT
