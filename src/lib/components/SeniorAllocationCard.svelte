@@ -1,7 +1,7 @@
 <!--
 	SeniorAllocationCard — renders a Savings MCP AllocationDecision
-	for a senior account: weighted multi-pool basket, blended APY, risk envelope,
-	rebalancing strategy, and rationale. Materially different from the junior
+	for an advanced account: weighted multi-pool basket, blended APY, risk envelope,
+	rebalancing strategy, and rationale. Materially different from the simple
 	one-click card — this is a composed, generated strategy.
 	Proposal-only: "Fund this strategy" is disabled (deferred signing slice).
 -->
@@ -10,12 +10,13 @@
 
 	type Props = {
 		allocation: AllocationDecision;
+		name?: string;
 		intendedAmountUsd?: number;
 		riskPreference?: string;
 		/** Hide the "Fund this strategy" CTA (e.g. when shown as a builder preview). */
 		showFundButton?: boolean;
 	};
-	let { allocation, intendedAmountUsd, riskPreference, showFundButton = true }: Props = $props();
+	let { allocation, name, intendedAmountUsd, riskPreference, showFundButton = true }: Props = $props();
 
 	const PRODUCT: Record<string, string> = { lend: 'Lend', earn: 'Earn' };
 	// quiet palette for the weight segments
@@ -27,7 +28,7 @@
 	<div class="mb-3 flex items-start justify-between">
 		<div class="flex flex-col">
 			<div class="flex items-center gap-2">
-				<h3 class="text-[17px] font-bold text-ink">Senior strategy</h3>
+				<h3 class="text-[17px] font-bold text-ink">{name ?? 'Advanced strategy'}</h3>
 				{#if riskPreference}
 					<span class="rounded-pill bg-ink/8 px-2.5 py-0.5 text-[11px] font-semibold capitalize text-ink">
 						{riskPreference}

@@ -58,20 +58,21 @@ export type SavingsCatalogue = {
 	generatedAt: string;
 };
 
-// ---------------------------------------------------------------- Senior accounts (Slice 2)
+// ---------------------------------------------------------------- Savings accounts
 
-export type SavingsAccountType = 'junior' | 'senior';
+export type SavingsAccountType = 'simple' | 'advanced';
 export type RiskPreference = 'conservative' | 'balanced' | 'aggressive';
 
 /** Directional steer applied on reroll — the revealed-preference signal. Each
  *  one deterministically shifts the allocation; they accumulate across rerolls. */
 export type SeniorNudge = 'more_conservative' | 'more_aggressive' | 'fewer_pools';
 
-/** The senior-account config the user submits — the "mandate" the agents reason against. */
+/** The advanced-account config the user submits — the "mandate" the agents reason against. */
 export type SeniorMandate = {
 	selectedPoolIds: string[];
 	intendedAmountUsd: number;
 	riskPreference: RiskPreference;
+	name?: string;
 	/** The accumulated reroll steers that produced the accepted allocation. */
 	nudges?: SeniorNudge[];
 };
@@ -87,7 +88,7 @@ export type AllocationWeight = {
 	apy: number;
 };
 
-/** The agent sequence's output — the proposed senior strategy. */
+/** The agent sequence's output — the proposed advanced strategy. */
 export type AllocationDecision = {
 	weights: AllocationWeight[];
 	/** Weight-blended expected APY (fraction). */

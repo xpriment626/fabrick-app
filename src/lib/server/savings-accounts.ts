@@ -6,7 +6,7 @@
  * filtering. RLS is enabled on the table for defense-in-depth, but the app
  * reads/writes as admin + user_id.
  *
- * An account is `junior` (single-pool one-click, no allocation) or `senior`
+ * An account is `simple` (single selected conservative pool) or `advanced`
  * (multi-pool weighted basket with an agent-proposed allocation). Slice 2 is
  * proposal-only: accounts persist with their config + proposed allocation;
  * funding/execution is the deferred signing slice.
@@ -14,6 +14,7 @@
 
 import { supabaseAdmin } from '$lib/server/supabase';
 import type { Json } from '$lib/server/database.types';
+import { normalizeSavingsAccountType } from '$lib/savings/accounts';
 import type {
 	AllocationDecision,
 	SavingsAccountRecord,
@@ -31,7 +32,7 @@ function toRecord(row: {
 }): SavingsAccountRecord {
 	return {
 		id: row.id,
-		type: row.type as SavingsAccountType,
+		type: normalizeSavingsAccountType(row.type),
 		status: row.status,
 		config: (row.config as SavingsAccountRecord['config']) ?? {},
 		proposedAllocation: (row.proposed_allocation as AllocationDecision | null) ?? null,
@@ -51,7 +52,7 @@ export async function listSavingsAccounts(userId: string): Promise<SavingsAccoun
 	return (res.data ?? []).map(toRecord);
 }
 
-/** Create a savings account. For senior accounts, pass the mandate + proposed allocation. */
+/** Create a savings account. For advanced accounts, pass the mandate + proposed allocation. */
 export async function createSavingsAccount(args: {
 	userId: string;
 	type: SavingsAccountType;

@@ -1,5 +1,5 @@
 /**
- * POST /api/savings/senior/propose — propose a weighted allocation for a senior
+ * POST /api/savings/senior/propose — propose a weighted allocation for an advanced
  * account. PREVIEW ONLY — does NOT persist the account; the user accepts via
  * POST /api/savings/accounts.
  *
@@ -47,7 +47,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		NUDGES.includes(n as SeniorNudge)
 	);
 
-	if (selectedPoolIds.length < 2) throw error(400, 'select at least 2 pools for a senior account');
+	if (selectedPoolIds.length < 2) throw error(400, 'select at least 2 pools for an advanced account');
 	if (!Number.isFinite(amountUsd) || amountUsd <= 0) throw error(400, 'amountUsd must be positive');
 
 	const cat = await getSavingsCatalogue();

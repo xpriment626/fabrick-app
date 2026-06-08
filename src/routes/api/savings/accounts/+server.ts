@@ -1,14 +1,14 @@
 /**
  * POST /api/savings/accounts — create (accept) a savings account (§20 Slice 2).
  *
- * Junior: one-click, no allocation. Senior: the user ACCEPTS a previously
+ * Simple: one selected conservative pool, no allocation. Advanced: the user ACCEPTS a previously
  * previewed allocation (from /api/savings/senior/propose) — we persist the
  * config (mandate incl. the accumulated nudges) + the accepted allocation here,
  * and log the accept event. Proposal/persistence only — no execution/signing.
  *
  * Body:
- *   junior → { type: 'junior' }
- *   senior → { type: 'senior', config: SeniorMandate, proposedAllocation: AllocationDecision }
+ *   simple → { type: 'simple', config: { name, selectedPoolId, poolSnapshot } }
+ *   advanced → { type: 'advanced', config: SeniorMandate, proposedAllocation: AllocationDecision }
  * Response: { account: SavingsAccountRecord }
  */
 
@@ -28,31 +28,52 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	} catch {
 		throw error(400, 'expected JSON body');
 	}
-	const type = body.type === 'senior' ? 'senior' : body.type === 'junior' ? 'junior' : null;
-	if (!type) throw error(400, 'type must be junior or senior');
+	const type =
+		body.type === 'advanced' || body.type === 'senior'
+			? 'advanced'
+			: body.type === 'simple' || body.type === 'junior'
+				? 'simple'
+				: null;
+	if (!type) throw error(400, 'type must be simple or advanced');
 
-	if (type === 'junior') {
-		const account = await createSavingsAccount({ userId, type: 'junior' });
-		await logSavingsEvent({ userId, kind: 'junior_created', accountId: account.id });
+	if (type === 'simple') {
+		const config =
+			body.config && typeof body.config === 'object'
+				? (body.config as Record<string, unknown>)
+				: {};
+		if (typeof config.selectedPoolId !== 'string' || !config.selectedPoolId.trim()) {
+			throw error(400, 'simple account requires a selectedPoolId');
+		}
+		const account = await createSavingsAccount({ userId, type: 'simple', config });
+		await logSavingsEvent({
+			userId,
+			kind: 'simple_created',
+			accountId: account.id,
+			payload: {
+				name: typeof config.name === 'string' ? config.name : undefined,
+				selectedPoolId: config.selectedPoolId
+			}
+		});
 		return json({ account });
 	}
 
-	// senior — persist the accepted allocation + its mandate
+	// advanced — persist the accepted allocation + its mandate
 	const config =
 		body.config && typeof body.config === 'object'
 			? (body.config as Partial<SeniorMandate> & Record<string, unknown>)
 			: undefined;
 	const proposedAllocation = (body.proposedAllocation ?? null) as AllocationDecision | null;
 	if (!proposedAllocation || !Array.isArray(proposedAllocation.weights)) {
-		throw error(400, 'senior accept requires a proposedAllocation');
+		throw error(400, 'advanced accept requires a proposedAllocation');
 	}
 
-	const account = await createSavingsAccount({ userId, type: 'senior', config, proposedAllocation });
+	const account = await createSavingsAccount({ userId, type: 'advanced', config, proposedAllocation });
 	await logSavingsEvent({
 		userId,
-		kind: 'senior_accepted',
+		kind: 'advanced_accepted',
 		accountId: account.id,
 		payload: {
+			name: config?.name,
 			riskPreference: config?.riskPreference,
 			nudges: config?.nudges ?? [],
 			poolCount: proposedAllocation.weights.length,

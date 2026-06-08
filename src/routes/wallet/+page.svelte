@@ -1,13 +1,17 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { PageData } from './$types';
+	import {
+		accountDisplayName,
+		accountModeLabel
+	} from '$lib/savings/accounts';
 	import type {
 		OpportunityCard,
 		SavingsAccountRecord,
+		SavingsAccountType,
 		SavingsCatalogue
 	} from '$lib/savings/types';
 	import AgentSigningCard from '$lib/components/AgentSigningCard.svelte';
-	import SavingsCard from '$lib/components/SavingsCard.svelte';
 	import ReceiveModal from '$lib/components/ReceiveModal.svelte';
 	import SendModal from '$lib/components/SendModal.svelte';
 	import SeniorBuilder from '$lib/components/SeniorBuilder.svelte';
@@ -16,58 +20,45 @@
 	type Props = { data: PageData };
 	let { data }: Props = $props();
 
+	type CreatePhase = 'idle' | 'creating-simple' | 'error';
+	type DepositPhase = 'idle' | 'simulating' | 'ready' | 'error';
+	type DevnetToken = { mint: string; uiAmount: number; decimals: number };
+	type DevnetBalance = { address: string; lamports: number; sol: number; tokens: DevnetToken[] };
+
 	const wallet = $derived(data.walletSnapshot);
 
-	// --- Savings accounts + create-account gate (§20 Slice 2) -------------------
-	// Accounts = SSR-loaded (data) + any created this session (extraAccounts),
-	// derived so we don't freeze a snapshot of the reactive `data` prop.
 	let extraAccounts = $state<SavingsAccountRecord[]>([]);
 	const accounts = $derived<SavingsAccountRecord[]>([
 		...extraAccounts,
 		...(data.savingsAccounts ?? [])
 	]);
-	let creating = $state<null | 'choosing' | 'senior'>(null);
-	let juniorBusy = $state(false);
+	const simpleAccounts = $derived(accounts.filter((account) => account.type === 'simple'));
+	const advancedAccounts = $derived(accounts.filter((account) => account.type === 'advanced'));
+
+	let creating = $state(false);
+	let accountName = $state('');
+	let selectedMode = $state<SavingsAccountType>('simple');
+	let createPhase = $state<CreatePhase>('idle');
 	let createError = $state<string | null>(null);
 
-	const hasJunior = $derived(accounts.some((a) => a.type === 'junior'));
-	const seniorAccounts = $derived(accounts.filter((a) => a.type === 'senior'));
-
-	async function createJunior() {
-		if (juniorBusy) return;
-		juniorBusy = true;
-		createError = null;
-		try {
-			const res = await fetch('/api/savings/accounts', {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ type: 'junior' })
-			});
-			const body = await res.json();
-			if (!res.ok || !body?.account) throw new Error(body?.message ?? `create failed (${res.status})`);
-			extraAccounts = [body.account as SavingsAccountRecord, ...extraAccounts];
-			creating = null;
-		} catch (err) {
-			createError = err instanceof Error ? err.message : String(err);
-		} finally {
-			juniorBusy = false;
-		}
-	}
-
-	function onSeniorProposed(account: SavingsAccountRecord) {
-		extraAccounts = [account, ...extraAccounts];
-		creating = null;
-	}
-
-	// Wallet-standard Deposit (receive: QR + copy) / Withdraw (send: recipient).
-	let walletModal = $state<'receive' | 'send' | null>(null);
-
-	// --- Savings catalogue (design §20) — public, fund-independent, client-fetched.
 	let catalogue = $state<SavingsCatalogue | null>(null);
 	let catState = $state<'loading' | 'loaded' | 'error'>('loading');
-	let showDiscover = $state(false);
 
-	const browseCards = $derived<OpportunityCard[]>(catalogue ? [...catalogue.lend, ...catalogue.earn] : []);
+	const allPools = $derived<OpportunityCard[]>(
+		catalogue ? [...catalogue.defaults, ...catalogue.lend, ...catalogue.earn] : []
+	);
+	const simplePools = $derived<OpportunityCard[]>([
+		...allPools.filter((pool) => pool.depositable && pool.riskTier === 'conservative'),
+		...allPools.filter((pool) => pool.depositable && pool.riskTier !== 'conservative')
+	]);
+	let selectedSimplePoolId = $state('');
+	const selectedSimplePool = $derived(
+		simplePools.find((pool) => pool.id === selectedSimplePoolId) ?? simplePools[0] ?? null
+	);
+
+	$effect(() => {
+		if (!selectedSimplePoolId && simplePools[0]) selectedSimplePoolId = simplePools[0].id;
+	});
 
 	onMount(async () => {
 		try {
@@ -80,8 +71,76 @@
 		}
 	});
 
-	// --- Deposit flow (Slice 1: Main Market reserve supply; simulate-only) -------
-	type DepositPhase = 'idle' | 'simulating' | 'ready' | 'error';
+	function startCreate(mode: SavingsAccountType = 'simple') {
+		selectedMode = mode;
+		accountName = '';
+		createPhase = 'idle';
+		createError = null;
+		creating = true;
+	}
+
+	function stopCreate() {
+		creating = false;
+		createPhase = 'idle';
+		createError = null;
+	}
+
+	function onAdvancedCreated(account: SavingsAccountRecord) {
+		extraAccounts = [account, ...extraAccounts];
+		stopCreate();
+	}
+
+	async function createSimpleAccount() {
+		if (createPhase === 'creating-simple' || !selectedSimplePool) return;
+		const name = accountName.trim();
+		if (!name) {
+			createError = 'Name this savings account first.';
+			createPhase = 'error';
+			return;
+		}
+
+		createPhase = 'creating-simple';
+		createError = null;
+		try {
+			const res = await fetch('/api/savings/accounts', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					type: 'simple',
+					config: {
+						name,
+						selectedPoolId: selectedSimplePool.id,
+						poolSnapshot: selectedSimplePool
+					}
+				})
+			});
+			const body = await res.json();
+			if (!res.ok || !body?.account) throw new Error(body?.message ?? `create failed (${res.status})`);
+			extraAccounts = [body.account as SavingsAccountRecord, ...extraAccounts];
+			stopCreate();
+		} catch (err) {
+			createPhase = 'error';
+			createError = err instanceof Error ? err.message : String(err);
+		}
+	}
+
+	function simpleAccountPool(account: SavingsAccountRecord): OpportunityCard | null {
+		const pool = account.config?.poolSnapshot;
+		if (!pool || typeof pool !== 'object') return null;
+		return pool as OpportunityCard;
+	}
+
+	function accountAmount(account: SavingsAccountRecord): number | null {
+		const amount = account.config?.intendedAmountUsd;
+		return typeof amount === 'number' && Number.isFinite(amount) ? amount : null;
+	}
+
+	function apyLabel(apy: number | undefined): string {
+		return typeof apy === 'number' ? `${(apy * 100).toFixed(2)}%` : 'APY pending';
+	}
+
+	let walletModal = $state<'receive' | 'send' | null>(null);
+
 	let depositTarget = $state<OpportunityCard | null>(null);
 	let depositAmount = $state('1');
 	let depositPhase = $state<DepositPhase>('idle');
@@ -93,6 +152,7 @@
 		depositPhase = 'idle';
 		depositMsg = null;
 	}
+
 	function closeDeposit() {
 		depositTarget = null;
 	}
@@ -128,10 +188,6 @@
 		}
 	}
 
-	// --- Cluster toggle (§18): Mainnet (savings-first) ↔ Devnet (signing test). --
-	type DevnetToken = { mint: string; uiAmount: number; decimals: number };
-	type DevnetBalance = { address: string; lamports: number; sol: number; tokens: DevnetToken[] };
-
 	const clusters = ['mainnet', 'devnet'] as const;
 	let cluster = $state<'mainnet' | 'devnet'>('mainnet');
 	let devnetState = $state<'idle' | 'loading' | 'loaded' | 'error'>('idle');
@@ -164,10 +220,12 @@
 			devnetState = 'error';
 		}
 	}
+
 	function setCluster(next: 'mainnet' | 'devnet') {
 		cluster = next;
 		if (next === 'devnet' && devnetState === 'idle') void loadDevnet();
 	}
+
 	async function copyAddress() {
 		try {
 			await navigator.clipboard.writeText(wallet.addressFull);
@@ -182,10 +240,12 @@
 	let activeTab = $state<(typeof tabs)[number]>('Portfolio');
 </script>
 
-<main class="mx-auto max-w-[760px] px-10 py-12">
-	<!-- Header: savings title + cluster toggle (dev affordance) -->
-	<div class="mb-8 flex items-center justify-between">
-		<h1 class="text-[22px] font-bold tracking-[-0.02em] text-ink">Savings</h1>
+<main class="mx-auto max-w-[860px] px-5 py-8 sm:px-8 lg:px-10">
+	<div class="mb-7 flex items-center justify-between">
+		<div>
+			<div class="eyebrow text-muted">Wallet</div>
+			<h1 class="mt-1 text-[24px] font-bold tracking-[-0.02em] text-ink">Fabrick</h1>
+		</div>
 		<div class="inline-flex items-center rounded-pill border border-border bg-surface p-1">
 			{#each clusters as c (c)}
 				<button
@@ -205,172 +265,279 @@
 	</div>
 
 	{#if cluster === 'mainnet'}
-		<!-- Balance -->
-		<section class="mb-6 flex flex-col items-center gap-1">
-			<div class="eyebrow text-muted">Total balance</div>
-			<div class="text-[48px] font-extrabold tracking-[-0.05em] text-ink">{wallet.balanceUsd}</div>
-			<div
-				class="text-sm font-medium {wallet.deltaTodayPct > 0
-					? 'text-positive'
-					: wallet.deltaTodayPct < 0
-						? 'text-negative'
-						: 'text-muted'}"
-			>
-				{wallet.deltaToday} ({wallet.deltaTodayPct.toFixed(2)}%) today
+		<section class="mb-5 rounded-[22px] border border-border bg-surface p-5 shadow-card sm:p-6">
+			<div class="mb-8 flex items-start justify-between gap-5">
+				<div>
+					<div class="eyebrow mb-2 text-muted">Everyday wallet</div>
+					<div class="font-mono text-[13px] text-muted">
+						{wallet.addressFull.slice(0, 6)}…{wallet.addressFull.slice(-6)}
+					</div>
+				</div>
+				<button
+					type="button"
+					onclick={copyAddress}
+					class="rounded-full border border-border px-3 py-1.5 text-[12px] font-semibold text-ink transition-colors hover:bg-bg"
+				>
+					{copied ? 'Copied' : 'Copy'}
+				</button>
+			</div>
+
+			<div class="mb-7">
+				<div class="text-[13px] font-semibold text-muted">Total balance</div>
+				<div class="mt-1 text-[46px] font-extrabold leading-none tracking-[-0.04em] text-ink sm:text-[58px]">
+					{wallet.balanceUsd}
+				</div>
+				<div
+					class="mt-2 text-sm font-medium {wallet.deltaTodayPct > 0
+						? 'text-positive'
+						: wallet.deltaTodayPct < 0
+							? 'text-negative'
+							: 'text-muted'}"
+				>
+					{wallet.deltaToday} ({wallet.deltaTodayPct.toFixed(2)}%) today
+				</div>
+			</div>
+
+			<div class="grid grid-cols-2 gap-3">
+				<button
+					type="button"
+					onclick={() => (walletModal = 'receive')}
+					class="flex items-center justify-center gap-2 rounded-[14px] bg-ink px-4 py-3 text-[14px] font-semibold text-surface transition-opacity hover:opacity-90"
+				>
+					<span class="text-[19px] leading-none">+</span>
+					Deposit
+				</button>
+				<button
+					type="button"
+					onclick={() => (walletModal = 'send')}
+					class="flex items-center justify-center gap-2 rounded-[14px] border border-border bg-surface px-4 py-3 text-[14px] font-semibold text-ink transition-colors hover:bg-bg"
+				>
+					<span class="text-[17px] leading-none">↗</span>
+					Send
+				</button>
 			</div>
 		</section>
 
-		<!-- Deposit (receive: QR + copy) / Withdraw (send: recipient) — wallet standards -->
-		<section class="mb-10 grid grid-cols-2 gap-3">
-			<button
-				type="button"
-				onclick={() => (walletModal = 'receive')}
-				class="rounded-[12px] bg-ink px-4 py-3 text-[14px] font-semibold text-surface transition-opacity hover:opacity-90"
-			>
-				Deposit
-			</button>
-			<button
-				type="button"
-				onclick={() => (walletModal = 'send')}
-				class="rounded-[12px] border border-border bg-surface px-4 py-3 text-[14px] font-semibold text-ink transition-colors hover:bg-bg"
-			>
-				Withdraw
-			</button>
-		</section>
-
-		<!-- Savings accounts (§20 Slice 2) — create-account gate -->
-		<section class="mb-10">
-			{#if creating === 'choosing'}
-				<!-- Junior vs Senior choice -->
-				<div class="mb-3 flex items-center justify-between">
-					<h2 class="text-[15px] font-bold text-ink">Create a savings account</h2>
-					<button type="button" onclick={() => (creating = null)} class="text-[13px] text-muted hover:text-ink">
-						Cancel
-					</button>
-				</div>
-				<div class="grid grid-cols-2 gap-4">
-					<button
-						type="button"
-						onclick={createJunior}
-						disabled={juniorBusy}
-						class="flex flex-col items-start gap-2 rounded-card border border-border bg-surface p-5 text-left transition-colors hover:border-ink disabled:opacity-50"
-					>
-						<span class="text-[15px] font-bold text-ink">Junior</span>
-						<span class="text-[12.5px] leading-relaxed text-muted">
-							One-click into a single USDC opportunity. The simplest save.
-						</span>
-						<span class="mt-1 text-[12px] font-semibold text-ink">{juniorBusy ? 'Creating…' : 'Create junior →'}</span>
-					</button>
-					<button
-						type="button"
-						onclick={() => (creating = 'senior')}
-						class="flex flex-col items-start gap-2 rounded-card border border-border bg-surface p-5 text-left transition-colors hover:border-ink"
-					>
-						<span class="text-[15px] font-bold text-ink">Senior</span>
-						<span class="text-[12.5px] leading-relaxed text-muted">
-							Compose multiple USDC opportunities with a Savings MCP allocation preview.
-						</span>
-						<span class="mt-1 text-[12px] font-semibold text-ink">Compose senior →</span>
-					</button>
-				</div>
-				{#if createError}<p class="mt-3 text-[12px] text-negative">{createError}</p>{/if}
-			{:else if creating === 'senior'}
-				{#if catalogue}
-					<SeniorBuilder {catalogue} onProposed={onSeniorProposed} onCancel={() => (creating = null)} />
-				{:else}
-					<div class="rounded-card border border-border bg-surface p-6 text-[13px] text-muted">
-						Loading catalogue…
-					</div>
-				{/if}
-			{:else if accounts.length === 0}
-				<!-- No savings account yet → create gate -->
-				<div
-					class="flex flex-col items-center gap-3 rounded-card border border-dashed border-border bg-surface px-6 py-12 text-center"
-				>
-					<div class="text-[17px] font-bold text-ink">No savings account yet</div>
-					<p class="max-w-[380px] text-[13px] leading-relaxed text-muted">
-						Open a USDC savings account — a simple one-click opportunity, or a custom multi-venue
-						strategy composed from Savings MCP analytics.
+		<section class="mb-8">
+			<div class="mb-3 flex items-center justify-between gap-3">
+				<div>
+					<h2 class="text-[18px] font-bold tracking-[-0.02em] text-ink">Savings accounts</h2>
+					<p class="mt-0.5 text-[13px] text-muted">
+						Organize deposits by goal, then choose where each account earns.
 					</p>
+				</div>
+				{#if accounts.length}
 					<button
 						type="button"
-						onclick={() => (creating = 'choosing')}
-						class="mt-1 rounded-[10px] bg-ink px-5 py-2.5 text-[13px] font-semibold text-surface transition-opacity hover:opacity-90"
+						onclick={() => startCreate('simple')}
+						class="shrink-0 rounded-full bg-ink px-4 py-2 text-[12.5px] font-semibold text-surface transition-opacity hover:opacity-90"
 					>
-						Create savings account
+						New account
 					</button>
-				</div>
-			{:else}
-				<!-- Existing accounts -->
-				<div class="mb-3 flex items-center justify-between">
-					<h2 class="text-[15px] font-bold text-ink">Your savings</h2>
-					<button
-						type="button"
-						onclick={() => (creating = 'choosing')}
-						class="text-[12.5px] font-semibold text-ink underline-offset-2 hover:underline"
-					>
-						+ New account
-					</button>
-				</div>
+				{/if}
+			</div>
 
-				{#each seniorAccounts as acct (acct.id)}
-					{#if acct.proposedAllocation}
-						<div class="mb-4">
-							<SeniorAllocationCard
-								allocation={acct.proposedAllocation}
-								intendedAmountUsd={acct.config?.intendedAmountUsd}
-								riskPreference={acct.config?.riskPreference}
-							/>
+			{#if creating}
+				<section class="rounded-[18px] border border-border bg-surface p-5 shadow-card">
+					<div class="mb-4 flex items-start justify-between gap-4">
+						<div>
+							<h3 class="text-[17px] font-bold text-ink">Open savings account</h3>
+							<p class="mt-1 text-[12.5px] leading-relaxed text-muted">
+								Name the goal, then choose Simple for one conservative pool or Advanced for a composed router.
+							</p>
 						</div>
-					{/if}
-				{/each}
-
-				{#if hasJunior}
-					<div class="mb-2 flex items-baseline justify-between">
-						<h3 class="text-[14px] font-semibold text-ink">Junior · one-click pools</h3>
-						<span class="text-[12px] text-muted">USDC · Savings MCP</span>
+						<button type="button" onclick={stopCreate} class="text-[13px] text-muted hover:text-ink">
+							Cancel
+						</button>
 					</div>
-					{#if catState === 'loading'}
-						<div class="grid grid-cols-1 gap-4">
-							{#each [0] as i (i)}
-								<div class="h-[188px] animate-pulse rounded-card border border-border bg-surface"></div>
-							{/each}
-						</div>
-					{:else if catState === 'error'}
-						<div class="rounded-card border border-border bg-surface p-6 text-[13px] text-negative">
-							Couldn't load the catalogue.
-						</div>
-					{:else if catalogue}
-						<div class="grid grid-cols-1 gap-4">
-							{#each catalogue.defaults as card (card.id)}
-								<SavingsCard {card} variant="default" onDeposit={openDeposit} />
-							{/each}
-						</div>
-						<div class="mt-6">
+
+					<label class="mb-1.5 block text-[12px] font-semibold text-muted" for="account-name">
+						Account name
+					</label>
+					<input
+						id="account-name"
+						bind:value={accountName}
+						placeholder="Vacation, College, Healthcare"
+						class="mb-4 w-full rounded-[12px] border border-border bg-bg px-3 py-3 text-[15px] font-semibold text-ink outline-none transition-colors placeholder:text-muted focus:border-ink"
+					/>
+
+					<div class="mb-5 grid grid-cols-2 gap-2 rounded-[14px] bg-bg p-1">
+						{#each ['simple', 'advanced'] as mode (mode)}
 							<button
 								type="button"
-								onclick={() => (showDiscover = !showDiscover)}
-								class="flex w-full items-center justify-between border-b border-border pb-3 text-left"
+								onclick={() => (selectedMode = mode as SavingsAccountType)}
+								class="rounded-[11px] px-3 py-2.5 text-left transition-colors {selectedMode === mode
+									? 'bg-surface text-ink shadow-card'
+									: 'text-muted hover:text-ink'}"
 							>
-								<span class="text-[14px] font-bold text-ink">Browse rates</span>
-								<span class="text-[12.5px] font-medium text-muted">
-									{browseCards.length} more opportunities · {showDiscover ? 'Hide' : 'Discover'}
+								<span class="block text-[13.5px] font-bold">{accountModeLabel(mode)}</span>
+								<span class="mt-0.5 block text-[11.5px] leading-snug">
+									{mode === 'simple' ? 'One conservative pool' : 'Weighted deposit router'}
 								</span>
 							</button>
-							{#if showDiscover}
-								<div class="mt-4 flex flex-col gap-2.5">
-									{#each browseCards as card (card.id)}
-										<SavingsCard {card} variant="browse" />
+						{/each}
+					</div>
+
+					{#if selectedMode === 'simple'}
+						<div class="mb-4">
+							<div class="mb-2 flex items-center justify-between">
+								<span class="eyebrow text-muted">Conservative pool</span>
+								{#if catState === 'loaded'}
+									<span class="text-[11.5px] text-muted">{simplePools.length} available</span>
+								{/if}
+							</div>
+							{#if catState === 'loading'}
+								<div class="h-[112px] animate-pulse rounded-[14px] border border-border bg-bg"></div>
+							{:else if catState === 'error'}
+								<div class="rounded-[14px] border border-border bg-bg p-4 text-[13px] text-negative">
+									Couldn't load Savings MCP pools.
+								</div>
+							{:else if simplePools.length}
+								<div class="grid min-w-0 gap-2 overflow-hidden">
+									{#each simplePools.slice(0, 4) as pool (pool.id)}
+										<button
+											type="button"
+											onclick={() => (selectedSimplePoolId = pool.id)}
+											class="flex w-full min-w-0 items-center gap-3 rounded-[14px] border px-3 py-3 text-left transition-colors {selectedSimplePool?.id ===
+											pool.id
+												? 'border-ink bg-bg'
+												: 'border-border bg-surface hover:bg-bg/70'}"
+										>
+											<span
+												class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border {selectedSimplePool?.id ===
+												pool.id
+													? 'border-ink bg-ink text-surface'
+													: 'border-border'}"
+											>
+												{#if selectedSimplePool?.id === pool.id}<span class="text-[10px]">✓</span>{/if}
+											</span>
+											<span class="min-w-0 flex-1 overflow-hidden">
+												<span class="block truncate text-[13.5px] font-bold text-ink">{pool.title}</span>
+												<span class="block text-[11.5px] text-muted">{pool.venue} · {pool.riskTier}</span>
+											</span>
+											<span class="shrink-0 text-[15px] font-extrabold text-ink">{apyLabel(pool.apy)}</span>
+										</button>
 									{/each}
+								</div>
+							{:else}
+								<div class="rounded-[14px] border border-border bg-bg p-4 text-[13px] text-muted">
+									No deposit-ready conservative pool is available right now.
 								</div>
 							{/if}
 						</div>
+
+						{#if createPhase === 'error' && createError}
+							<p class="mb-3 rounded-[10px] bg-negative/10 px-3 py-2 text-[12px] text-negative">
+								{createError}
+							</p>
+						{/if}
+
+						<button
+							type="button"
+							onclick={createSimpleAccount}
+							disabled={createPhase === 'creating-simple' || !accountName.trim() || !selectedSimplePool}
+							class="w-full rounded-[12px] bg-ink px-4 py-3 text-[13px] font-semibold text-surface transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+						>
+							{createPhase === 'creating-simple' ? 'Creating…' : 'Create Simple account'}
+						</button>
+					{:else if catState === 'loading'}
+						<div class="h-[180px] animate-pulse rounded-[14px] border border-border bg-bg"></div>
+					{:else if catState === 'error' || !catalogue}
+						<div class="rounded-[14px] border border-border bg-bg p-5 text-[13px] text-negative">
+							Couldn't load Savings MCP pools.
+						</div>
+					{:else if accountName.trim()}
+						<SeniorBuilder
+							accountName={accountName.trim()}
+							{catalogue}
+							onProposed={onAdvancedCreated}
+							onCancel={stopCreate}
+						/>
+					{:else}
+						<div class="rounded-[14px] border border-border bg-bg p-5 text-[13px] text-muted">
+							Name this account before composing an Advanced deposit router.
+						</div>
 					{/if}
-				{/if}
+				</section>
+			{:else if accounts.length === 0}
+				<section
+					class="rounded-[20px] border border-dashed border-border bg-surface px-6 py-12 text-center shadow-card"
+				>
+					<div class="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-bg text-[36px] text-ink">
+						+
+					</div>
+					<h3 class="text-[19px] font-extrabold tracking-[-0.02em] text-ink">
+						Create your first savings account
+					</h3>
+					<p class="mx-auto mt-2 max-w-[430px] text-[13px] leading-relaxed text-muted">
+						Start with a named goal. Pool selection happens inside the account setup, so the wallet
+						stays focused on balances and accounts.
+					</p>
+					<button
+						type="button"
+						onclick={() => startCreate('simple')}
+						class="mt-5 rounded-[14px] bg-ink px-5 py-3 text-[13px] font-semibold text-surface transition-opacity hover:opacity-90"
+					>
+						Open savings account
+					</button>
+				</section>
+			{:else}
+				<div class="grid gap-3">
+					{#each simpleAccounts as account (account.id)}
+						{@const pool = simpleAccountPool(account)}
+						<section class="rounded-[18px] border border-border bg-surface p-4 shadow-card">
+							<div class="flex items-start justify-between gap-4">
+								<div class="min-w-0">
+									<div class="mb-1 flex items-center gap-2">
+										<h3 class="truncate text-[17px] font-extrabold tracking-[-0.02em] text-ink">
+											{accountDisplayName(account.config, 'Simple savings')}
+										</h3>
+										<span class="rounded-full bg-bg px-2 py-0.5 text-[11px] font-semibold text-muted">
+											Simple
+										</span>
+									</div>
+									<p class="text-[12.5px] text-muted">
+										{pool ? `${pool.venue} · ${pool.title}` : 'Choose a pool to finish setup'}
+									</p>
+								</div>
+								<div class="shrink-0 text-right">
+									<div class="text-[22px] font-extrabold tracking-[-0.03em] text-ink">
+										{pool ? apyLabel(pool.apy) : '--'}
+									</div>
+									<div class="text-[11px] text-muted">projected APY</div>
+								</div>
+							</div>
+							<div class="mt-4 flex items-center justify-between gap-3 border-t border-border pt-3">
+								<span class="text-[12px] text-muted">USDC deposits route to this account's selected pool.</span>
+								{#if pool}
+									<button
+										type="button"
+										onclick={() => openDeposit(pool)}
+										class="rounded-[10px] bg-ink px-3 py-2 text-[12px] font-semibold text-surface transition-opacity hover:opacity-90"
+									>
+										Deposit
+									</button>
+								{/if}
+							</div>
+						</section>
+					{/each}
+
+					{#each advancedAccounts as account (account.id)}
+						{#if account.proposedAllocation}
+							<SeniorAllocationCard
+								name={accountDisplayName(account.config, 'Advanced savings')}
+								allocation={account.proposedAllocation}
+								intendedAmountUsd={accountAmount(account) ?? undefined}
+								riskPreference={typeof account.config?.riskPreference === 'string'
+									? account.config.riskPreference
+									: undefined}
+							/>
+						{/if}
+					{/each}
+				</div>
 			{/if}
 		</section>
 
-		<!-- Portfolio / Collectibles -->
 		<section class="mb-6 flex gap-6 border-b border-border">
 			{#each tabs as tab (tab)}
 				<button
@@ -416,7 +583,7 @@
 					{/each}
 				{:else}
 					<div class="flex h-32 items-center justify-center text-sm text-muted">
-						No holdings yet — deposit into a savings option to get started.
+						No wallet holdings yet.
 					</div>
 				{/if}
 			</section>
@@ -426,7 +593,6 @@
 			</section>
 		{/if}
 
-		<!-- Advanced — autonomous agent signing (deferred execution slice) -->
 		<section class="mt-2">
 			<div class="eyebrow mb-3 text-muted">Advanced</div>
 			<AgentSigningCard
@@ -435,7 +601,6 @@
 			/>
 		</section>
 	{:else}
-		<!-- Devnet panel — test-environment balance for the signing ladder (§18). -->
 		<section class="mb-8 flex flex-col items-center gap-2">
 			<div class="flex items-center gap-2">
 				<span class="eyebrow text-muted">Devnet balance</span>
@@ -543,14 +708,12 @@
 	{/if}
 </main>
 
-<!-- Wallet-standard Deposit (receive) / Withdraw (send) -->
 {#if walletModal === 'receive'}
 	<ReceiveModal address={wallet.addressFull} onClose={() => (walletModal = null)} />
 {:else if walletModal === 'send'}
 	<SendModal owner={wallet.addressFull} onClose={() => (walletModal = null)} />
 {/if}
 
-<!-- Savings deposit modal (Slice 1: Main Market reserve supply, simulate-only) -->
 {#if depositTarget}
 	<div
 		class="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4"
@@ -568,13 +731,13 @@
 			onclick={(e) => e.stopPropagation()}
 		>
 			<div class="mb-1 flex items-center justify-between">
-				<h3 class="text-[17px] font-bold text-ink">Deposit {depositTarget.asset}</h3>
-				<button type="button" onclick={closeDeposit} class="text-[13px] text-muted hover:text-ink"
-					>Close</button
-				>
+				<h3 class="text-[17px] font-bold text-ink">Deposit into {depositTarget.title}</h3>
+				<button type="button" onclick={closeDeposit} class="text-[13px] text-muted hover:text-ink">
+					Close
+				</button>
 			</div>
 			<p class="mb-4 text-[12.5px] text-muted">
-				{depositTarget.venue} · {(depositTarget.apy * 100).toFixed(2)}% APY
+				{depositTarget.venue} · {apyLabel(depositTarget.apy)} APY
 			</p>
 
 			<label class="mb-1.5 block text-[12px] font-semibold text-muted" for="dep-amt">Amount</label>

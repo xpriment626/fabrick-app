@@ -1,5 +1,5 @@
 <!--
-	SeniorBuilder (§18 reroll model, §20 Slice 2) — compose a senior account.
+	SeniorBuilder (§18 reroll model, §20 Slice 2) — compose an advanced account.
 
 	Flow: pick pools + amount + risk preference → Compose → a PREVIEW of the
 	Savings MCP-proposed allocation. From the preview the user can Accept & save,
@@ -21,11 +21,12 @@
 	import SeniorAllocationCard from './SeniorAllocationCard.svelte';
 
 	type Props = {
+		accountName: string;
 		catalogue: SavingsCatalogue;
 		onProposed: (account: SavingsAccountRecord) => void;
 		onCancel: () => void;
 	};
-	let { catalogue, onProposed, onCancel }: Props = $props();
+	let { accountName, catalogue, onProposed, onCancel }: Props = $props();
 
 	const pools = $derived<OpportunityCard[]>([
 		...catalogue.defaults,
@@ -116,8 +117,8 @@
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({
-					type: 'senior',
-					config: preview.mandate,
+					type: 'advanced',
+					config: { ...preview.mandate, name: accountName.trim() },
 					proposedAllocation: preview.allocation
 				})
 			});
@@ -134,7 +135,7 @@
 <section class="rounded-card border border-border bg-surface p-5 shadow-card">
 	<div class="mb-1 flex items-center justify-between">
 		<h3 class="text-[17px] font-bold text-ink">
-			{preview ? 'Your proposed strategy' : 'Compose a senior account'}
+			{preview ? 'Your proposed strategy' : 'Compose an advanced account'}
 		</h3>
 		<button type="button" onclick={onCancel} class="text-[13px] text-muted hover:text-ink">Cancel</button>
 	</div>
@@ -156,7 +157,7 @@
 	{:else if preview}
 		<!-- PREVIEW: the proposed allocation + steer / accept -->
 		<p class="mb-3 text-[12.5px] text-muted">
-			Composed from Savings MCP analytics. Steer it, or accept to save — nothing is funded yet.
+			Composed for {accountName || 'this account'} from Savings MCP analytics. Steer it, or accept to save — nothing is funded yet.
 		</p>
 
 		<SeniorAllocationCard

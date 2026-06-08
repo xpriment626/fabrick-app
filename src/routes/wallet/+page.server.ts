@@ -21,8 +21,8 @@ import {
 export const load: PageServerLoad = async ({ locals }) => {
 	if (!locals.user) throw redirect(302, '/');
 
-	// Savings accounts drive the §20 create-account gate (no account → create CTA;
-	// junior → catalogue view; senior → proposed-allocation card). Survives reload.
+	// Savings accounts drive the create-account gate (no account -> create CTA;
+	// simple -> selected pool card; advanced -> proposed-allocation card). Survives reload.
 	let savingsAccounts: Awaited<ReturnType<typeof listSavingsAccounts>> = [];
 	try {
 		savingsAccounts = await listSavingsAccounts(locals.user.id);
