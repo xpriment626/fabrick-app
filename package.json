@@ -8,14 +8,20 @@
 	},
 	"scripts": {
 		"dev": "vite dev",
+		"dev:auth": "tsx scripts/dev-savings.ts",
+		"dev:bypass": "tsx scripts/dev-savings.ts --bypass",
 		"dev:savings": "tsx scripts/dev-savings.ts",
 		"dev:savings:bypass": "tsx scripts/dev-savings.ts --bypass",
+		"smoke:coral:savings": "tsx scripts/coral-savings-smoke.ts",
+		"test": "tsx --test $(find src scripts -name '*.test.ts' -print)",
+		"test:e2e": "playwright test",
 		"build": "vite build",
 		"preview": "vite preview",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
 	},
 	"devDependencies": {
+		"@playwright/test": "^1.60.0",
 		"@sveltejs/adapter-vercel": "^5.4.0",
 		"@sveltejs/kit": "^2.20.0",
 		"@sveltejs/vite-plugin-svelte": "^5.0.0",

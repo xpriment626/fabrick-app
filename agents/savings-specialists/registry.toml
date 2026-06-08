@@ -1,0 +1,23 @@
+# Path manifest for the Fabrick savings specialist prototype agents.
+#
+# Coral Server v1.1+ discovers local agents from [registry].local_agents in
+# the server config. This file is not read directly by Coral Server; it keeps
+# the six directories together for scripts and handoff review.
+
+[[agent]]
+path = "opportunity-data-interpreter"
+
+[[agent]]
+path = "rate-quality-specialist"
+
+[[agent]]
+path = "exit-liquidity-specialist"
+
+[[agent]]
+path = "capacity-concentration-specialist"
+
+[[agent]]
+path = "strategy-exposure-specialist"
+
+[[agent]]
+path = "account-strategy-narrator"

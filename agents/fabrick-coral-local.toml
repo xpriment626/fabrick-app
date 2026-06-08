@@ -1,0 +1,23 @@
+[network]
+bind_address = "127.0.0.1"
+external_address = "127.0.0.1"
+bind_port = 5555
+allow_any_host = true
+
+[auth]
+keys = ["dev"]
+
+[registry]
+include_coral_home_agents = false
+include_debug_agents = true
+include_marketplace_agents = false
+watch_local_agents = true
+local_agent_rescan_timer = "30s"
+local_agents = [
+  "/Users/bambozlor/Desktop/product-lab/fabrick/fabrick-app/agents/savings-specialists/opportunity-data-interpreter",
+  "/Users/bambozlor/Desktop/product-lab/fabrick/fabrick-app/agents/savings-specialists/rate-quality-specialist",
+  "/Users/bambozlor/Desktop/product-lab/fabrick/fabrick-app/agents/savings-specialists/exit-liquidity-specialist",
+  "/Users/bambozlor/Desktop/product-lab/fabrick/fabrick-app/agents/savings-specialists/capacity-concentration-specialist",
+  "/Users/bambozlor/Desktop/product-lab/fabrick/fabrick-app/agents/savings-specialists/strategy-exposure-specialist",
+  "/Users/bambozlor/Desktop/product-lab/fabrick/fabrick-app/agents/savings-specialists/account-strategy-narrator"
+]

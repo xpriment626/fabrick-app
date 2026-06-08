@@ -1,0 +1,43 @@
+edition = 4
+
+[agent]
+name = "fabrick-opp-interpreter"
+version = "0.1.0"
+description = "Explains Savings MCP USDC opportunity data for Fabrick Simple and Advanced savings account concepts."
+summary = "Interprets Savings MCP opportunity payloads for Fabrick."
+readme = { type = "file", path = "../README.md" }
+license = { type = "spdx", expression = "MIT" }
+capabilities = ["resources", "tool_refreshing"]
+
+[[llm.proxies]]
+name = "MAIN"
+format.type = "OpenAI"
+models = ["gpt-5.4-nano"]
+
+[runtimes.prototype]
+iterations = 4
+delay = 0
+proxy = "MAIN"
+client = "openai"
+
+[runtimes.prototype.prompts.system]
+base = { type = "constant", name = "PROTOTYPE_DEFAULT_SYSTEM_PROMPT" }
+extra = { type = "file", path = "prompts/system-extra.md" }
+
+[runtimes.prototype.prompts.loop]
+initial.base = { type = "file", path = "prompts/initial-base.md" }
+initial.extra = { type = "option", name = "SMOKE_TASK" }
+followup = { type = "constant", name = "PROTOTYPE_DEFAULT_LOOP_FOLLOWUP_PROMPT" }
+
+[[runtimes.prototype.tools]]
+type = "mcp_streamable_http"
+url = { type = "option", name = "SAVINGS_MCP_URL" }
+auth.type = "none"
+
+[options.SAVINGS_MCP_URL]
+type = "string"
+required = true
+
+[options.SMOKE_TASK]
+type = "string"
+default = "Compare current USDC opportunities for a Fabrick Advanced savings account preview."
