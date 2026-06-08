@@ -14,8 +14,16 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getSavingsCatalogue, proposeSavingsAllocation } from '$lib/server/savings-mcp';
+import { buildCompositionReport } from '$lib/server/savings-composition-report';
+import { tryRunCoralCompositionSession } from '$lib/server/coral-composition-report';
 import { logSavingsEvent } from '$lib/server/savings-events';
-import type { OpportunityCard, RiskPreference, SeniorMandate, SeniorNudge } from '$lib/savings/types';
+import type {
+	AllocationDecision,
+	OpportunityCard,
+	RiskPreference,
+	SeniorMandate,
+	SeniorNudge
+} from '$lib/savings/types';
 
 const RISK: RiskPreference[] = ['conservative', 'balanced', 'aggressive'];
 const NUDGES: SeniorNudge[] = ['more_conservative', 'more_aggressive', 'fewer_pools'];
@@ -27,6 +35,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	let body: {
 		selectedPoolIds?: unknown;
 		amountUsd?: unknown;
+		accountName?: unknown;
+		previousAllocation?: unknown;
 		riskPreference?: unknown;
 		nudges?: unknown;
 	} = {};
@@ -43,6 +53,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const riskPreference = RISK.includes(body.riskPreference as RiskPreference)
 		? (body.riskPreference as RiskPreference)
 		: 'balanced';
+	const accountName = typeof body.accountName === 'string' ? body.accountName.trim() : undefined;
+	const previousAllocation =
+		body.previousAllocation && typeof body.previousAllocation === 'object'
+			? (body.previousAllocation as AllocationDecision)
+			: null;
 	const nudges = (Array.isArray(body.nudges) ? body.nudges : []).filter((n): n is SeniorNudge =>
 		NUDGES.includes(n as SeniorNudge)
 	);
@@ -66,9 +81,28 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		const mandate: SeniorMandate = {
 			selectedPoolIds: pools.map((p) => p.id),
 			intendedAmountUsd: amountUsd,
+			name: accountName,
 			riskPreference,
 			nudges
 		};
+		const coralReport = await tryRunCoralCompositionSession({
+			accountName,
+			allocation,
+			amountUsd,
+			pools,
+			previousAllocation,
+			riskPreference
+		});
+		const report = buildCompositionReport({
+			accountName,
+			allocation,
+			amountUsd,
+			agentOutput: coralReport.output,
+			coordination: coralReport.coordination,
+			pools,
+			previousAllocation,
+			riskPreference
+		});
 
 		// Behavioral event: first proposal vs a directional reroll.
 		await logSavingsEvent({
@@ -78,13 +112,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			payload: {
 				selectedPoolIds: mandate.selectedPoolIds,
 				amountUsd,
+				reportId: report.id,
 				riskPreference,
 				nudges,
 				blendedApyPct: allocation.blendedApyPct
 			}
 		});
 
-		return json({ allocation, mandate });
+		return json({ allocation, mandate, report });
 	} catch (err) {
 		console.warn('[savings/senior/propose] failed:', err);
 		throw error(502, `allocation proposal failed: ${err instanceof Error ? err.message : String(err)}`);

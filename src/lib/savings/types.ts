@@ -101,6 +101,87 @@ export type AllocationDecision = {
 	rationale: string;
 };
 
+export type CompositionReportFinding = {
+	specialist:
+		| 'opportunity'
+		| 'rate'
+		| 'liquidity'
+		| 'capacity'
+		| 'exposure'
+		| 'narrator';
+	title: string;
+	severity: 'info' | 'watch' | 'warning';
+	body: string;
+};
+
+export type CompositionReportPool = {
+	poolId: string;
+	title: string;
+	venue: string;
+	product: SavingsProduct;
+	riskTier: RiskTier;
+	integrationStatus: IntegrationStatus;
+	weightPct: number;
+	amountUsd: number;
+	apyPct: number;
+	apyContributionPct: number;
+	riskContribution: number;
+	depthBps: number;
+	capabilities: string[];
+	limitations: string[];
+};
+
+export type CompositionReportDelta = {
+	kind: 'initial' | 'reroll';
+	blendedApyDeltaPct: number;
+	weightChanges: Array<{
+		poolId: string;
+		title: string;
+		beforePct: number;
+		afterPct: number;
+		deltaPct: number;
+	}>;
+};
+
+export type CompositionReportChartData = {
+	weights: Array<{ label: string; valuePct: number }>;
+	apyContribution: Array<{ label: string; valuePct: number }>;
+	riskContribution: Array<{ label: string; value: number }>;
+	depositDepth: Array<{ label: string; valueBps: number }>;
+};
+
+export type CompositionReport = {
+	id: string;
+	generatedAt: string;
+	accountName?: string;
+	amountUsd: number;
+	riskPreference: RiskPreference;
+	summary: {
+		headline: string;
+		blendedApyPct: number;
+		poolCount: number;
+		primaryRisk: string;
+		previewOnly: true;
+	};
+	narratorCopy: {
+		overview: string;
+		weightingRationale: string;
+		rebalancing: string;
+	};
+	pools: CompositionReportPool[];
+	findings: CompositionReportFinding[];
+	keyWarnings: string[];
+	chartData: CompositionReportChartData;
+	delta: CompositionReportDelta;
+	coordination: {
+		runtime: 'coral_cloud' | 'local_schema';
+		status: 'completed' | 'session_created' | 'unavailable';
+		namespace?: string;
+		sessionId?: string;
+		message?: string;
+	};
+};
+
 export type SavingsAccountRecord = {
 	id: string;
 	type: SavingsAccountType;

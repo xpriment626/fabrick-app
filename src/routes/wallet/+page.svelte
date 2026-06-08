@@ -7,12 +7,15 @@
 		accountModeLabel
 	} from '$lib/savings/accounts';
 	import type {
+		CompositionReport,
 		OpportunityCard,
 		SavingsAccountRecord,
 		SavingsAccountType,
 		SavingsCatalogue
 	} from '$lib/savings/types';
+	import { parseCompositionReport } from '$lib/savings/report';
 	import AgentSigningCard from '$lib/components/AgentSigningCard.svelte';
+	import CompositionReportView from '$lib/components/CompositionReport.svelte';
 	import ReceiveModal from '$lib/components/ReceiveModal.svelte';
 	import SendModal from '$lib/components/SendModal.svelte';
 	import SeniorBuilder from '$lib/components/SeniorBuilder.svelte';
@@ -49,6 +52,7 @@
 	let renameDraft = $state('');
 	let accountActionBusy = $state<string | null>(null);
 	let accountActionError = $state<Record<string, string>>({});
+	let openReportIds = $state<string[]>([]);
 
 	let catalogue = $state<SavingsCatalogue | null>(null);
 	let catState = $state<'loading' | 'loaded' | 'error'>('loading');
@@ -217,6 +221,16 @@
 	function accountAmount(account: SavingsAccountRecord): number | null {
 		const amount = account.config?.intendedAmountUsd;
 		return typeof amount === 'number' && Number.isFinite(amount) ? amount : null;
+	}
+
+	function compositionReportFor(account: SavingsAccountRecord): CompositionReport | null {
+		return parseCompositionReport(account.config?.compositionReport);
+	}
+
+	function toggleReport(accountId: string) {
+		openReportIds = openReportIds.includes(accountId)
+			? openReportIds.filter((id) => id !== accountId)
+			: [...openReportIds, accountId];
 	}
 
 	function apyLabel(apy: number | undefined): string {
@@ -414,6 +428,7 @@
 					<button
 						type="button"
 						onclick={() => startCreate('simple')}
+						data-testid="new-account-button"
 						class="shrink-0 rounded-full bg-ink px-4 py-2 text-[12.5px] font-semibold text-surface transition-opacity hover:opacity-90"
 					>
 						New account
@@ -450,6 +465,7 @@
 							<button
 								type="button"
 								onclick={() => (selectedMode = mode as SavingsAccountType)}
+								data-testid={`account-mode-${mode}`}
 								class="rounded-[11px] px-3 py-2.5 text-left transition-colors {selectedMode === mode
 									? 'bg-surface text-ink shadow-card'
 									: 'text-muted hover:text-ink'}"
@@ -560,6 +576,7 @@
 					<button
 						type="button"
 						onclick={() => startCreate('simple')}
+						data-testid="new-account-button"
 						class="mt-5 rounded-[14px] bg-ink px-5 py-3 text-[13px] font-semibold text-surface transition-opacity hover:opacity-90"
 					>
 						Open savings account
@@ -676,6 +693,7 @@
 
 					{#each advancedAccounts as account (account.id)}
 						{@const closeBlock = accountCloseBlock(account.config)}
+						{@const report = compositionReportFor(account)}
 						{#if account.proposedAllocation}
 							<SeniorAllocationCard
 								name={accountDisplayName(account.config, 'Advanced savings')}
@@ -685,6 +703,30 @@
 									? account.config.riskPreference
 									: undefined}
 							/>
+							{#if report}
+								<section class="rounded-[14px] bg-bg p-3">
+									<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+										<div class="min-w-0">
+											<div class="text-[12px] font-semibold text-ink">Composition report</div>
+											<p class="mt-1 text-[12px] text-muted">
+												Review the specialist findings, charts, and preview-only allocation rationale.
+											</p>
+										</div>
+										<button
+											type="button"
+											onclick={() => toggleReport(account.id)}
+											class="shrink-0 rounded-[10px] border border-border bg-surface px-3 py-2 text-[12px] font-semibold text-ink transition-colors hover:bg-bg"
+										>
+											{openReportIds.includes(account.id) ? 'Hide report' : 'View report'}
+										</button>
+									</div>
+									{#if openReportIds.includes(account.id)}
+										<div class="mt-4 border-t border-border pt-4">
+											<CompositionReportView {report} />
+										</div>
+									{/if}
+								</section>
+							{/if}
 							<section class="rounded-[14px] bg-bg p-3">
 								{#if editingAccountId === account.id}
 									<label

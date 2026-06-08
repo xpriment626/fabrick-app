@@ -11,6 +11,7 @@
 <script lang="ts">
 	import type {
 		AllocationDecision,
+		CompositionReport,
 		OpportunityCard,
 		RiskPreference,
 		SavingsAccountRecord,
@@ -18,7 +19,7 @@
 		SeniorMandate,
 		SeniorNudge
 	} from '$lib/savings/types';
-	import SeniorAllocationCard from './SeniorAllocationCard.svelte';
+	import CompositionReportView from './CompositionReport.svelte';
 
 	type Props = {
 		accountName: string;
@@ -41,7 +42,11 @@
 	let nudges = $state<SeniorNudge[]>([]);
 	let phase = $state<'compose' | 'generating' | 'preview' | 'accepting' | 'error'>('compose');
 	let errorMsg = $state<string | null>(null);
-	let preview = $state<{ allocation: AllocationDecision; mandate: SeniorMandate } | null>(null);
+	let preview = $state<{
+		allocation: AllocationDecision;
+		mandate: SeniorMandate;
+		report: CompositionReport;
+	} | null>(null);
 
 	const PRODUCT: Record<string, string> = { lend: 'Lend', earn: 'Earn' };
 	const TIER: Record<string, string> = {
@@ -76,15 +81,23 @@
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({
+					accountName: accountName.trim(),
 					selectedPoolIds: selected,
 					amountUsd: parseFloat(amount),
+					previousAllocation: preview?.allocation ?? null,
 					riskPreference,
 					nudges
 				})
 			});
 			const body = await res.json();
-			if (!res.ok || !body?.allocation) throw new Error(body?.message ?? `propose failed (${res.status})`);
-			preview = { allocation: body.allocation as AllocationDecision, mandate: body.mandate as SeniorMandate };
+			if (!res.ok || !body?.allocation || !body?.report) {
+				throw new Error(body?.message ?? `propose failed (${res.status})`);
+			}
+			preview = {
+				allocation: body.allocation as AllocationDecision,
+				mandate: body.mandate as SeniorMandate,
+				report: body.report as CompositionReport
+			};
 			phase = 'preview';
 		} catch (err) {
 			phase = 'error';
@@ -118,7 +131,7 @@
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({
 					type: 'advanced',
-					config: { ...preview.mandate, name: accountName.trim() },
+					config: { ...preview.mandate, name: accountName.trim(), compositionReport: preview.report },
 					proposedAllocation: preview.allocation
 				})
 			});
@@ -160,12 +173,7 @@
 			Composed for {accountName || 'this account'} from Savings MCP analytics. Steer it, or accept to save — nothing is funded yet.
 		</p>
 
-		<SeniorAllocationCard
-			allocation={preview.allocation}
-			intendedAmountUsd={preview.mandate.intendedAmountUsd}
-			riskPreference={preview.mandate.riskPreference}
-			showFundButton={false}
-		/>
+		<CompositionReportView report={preview.report} />
 
 		{#if nudges.length}
 			<div class="mt-3 flex flex-wrap items-center gap-1.5">
@@ -183,6 +191,7 @@
 					<button
 						type="button"
 						onclick={() => reroll(opt.key)}
+						data-testid={`advanced-reroll-${opt.key}`}
 						class="rounded-pill border border-border bg-surface px-3 py-1 text-[12px] font-semibold text-ink transition-colors hover:bg-bg"
 					>
 						{opt.label}
@@ -199,6 +208,7 @@
 			<button
 				type="button"
 				onclick={backToSelection}
+				data-testid="advanced-back-button"
 				class="rounded-[10px] border border-border bg-surface px-4 py-2.5 text-[13px] font-semibold text-ink transition-colors hover:bg-bg"
 			>
 				Back
@@ -206,6 +216,7 @@
 			<button
 				type="button"
 				onclick={accept}
+				data-testid="advanced-accept-button"
 				class="flex-1 rounded-[10px] bg-ink px-4 py-2.5 text-[13px] font-semibold text-surface transition-opacity hover:opacity-90"
 			>
 				Accept &amp; save
@@ -243,6 +254,7 @@
 				<input
 					bind:value={amount}
 					inputmode="decimal"
+					data-testid="advanced-amount-input"
 					class="w-full bg-transparent text-[15px] font-semibold text-ink outline-none"
 				/>
 			</div>
@@ -259,6 +271,7 @@
 					<button
 						type="button"
 						onclick={() => toggle(p.id)}
+						data-testid="advanced-pool-option"
 						class="flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left transition-colors last:border-b-0 {isSel
 							? 'bg-bg'
 							: 'hover:bg-bg/50'}"
@@ -293,6 +306,7 @@
 			type="button"
 			onclick={compose}
 			disabled={!canCompose}
+			data-testid="advanced-compose-button"
 			class="w-full rounded-[10px] bg-ink px-4 py-2.5 text-[13px] font-semibold text-surface transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
 		>
 			Compose strategy
