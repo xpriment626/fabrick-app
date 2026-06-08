@@ -14,7 +14,11 @@
 
 import { supabaseAdmin } from '$lib/server/supabase';
 import type { Json } from '$lib/server/database.types';
-import { normalizeSavingsAccountType } from '$lib/savings/accounts';
+import {
+	accountCloseBlock,
+	normalizeSavingsAccountType,
+	storageSavingsAccountType
+} from '$lib/savings/accounts';
 import type {
 	AllocationDecision,
 	SavingsAccountRecord,
@@ -63,7 +67,7 @@ export async function createSavingsAccount(args: {
 		.from('savings_accounts')
 		.insert({
 			user_id: args.userId,
-			type: args.type,
+			type: storageSavingsAccountType(args.type),
 			status: 'proposed',
 			config: (args.config as Json) ?? {},
 			proposed_allocation: (args.proposedAllocation as Json | null) ?? null
@@ -89,4 +93,49 @@ export async function getSavingsAccount(
 		.maybeSingle();
 	if (res.error) throw new Error(`getSavingsAccount: ${res.error.message}`);
 	return res.data ? toRecord(res.data) : null;
+}
+
+export async function updateSavingsAccountConfig(args: {
+	id: string;
+	userId: string;
+	config: SavingsAccountRecord['config'];
+}): Promise<SavingsAccountRecord> {
+	const res = await supabaseAdmin
+		.from('savings_accounts')
+		.update({ config: args.config as Json })
+		.eq('id', args.id)
+		.eq('user_id', args.userId)
+		.neq('status', 'archived')
+		.select('id, type, status, config, proposed_allocation, created_at')
+		.single();
+	if (res.error || !res.data) {
+		throw new Error(`updateSavingsAccountConfig: ${res.error?.message ?? 'no row returned'}`);
+	}
+	return toRecord(res.data);
+}
+
+export async function closeSavingsAccount(args: {
+	id: string;
+	userId: string;
+}): Promise<{ account: SavingsAccountRecord; blocked: ReturnType<typeof accountCloseBlock> | null }> {
+	const account = await getSavingsAccount(args.id, args.userId);
+	if (!account || account.status === 'archived') {
+		throw new Error('savings account not found');
+	}
+
+	const blocked = accountCloseBlock(account.config);
+	if (blocked) return { account, blocked };
+
+	const res = await supabaseAdmin
+		.from('savings_accounts')
+		.update({ status: 'archived' })
+		.eq('id', args.id)
+		.eq('user_id', args.userId)
+		.select('id, type, status, config, proposed_allocation, created_at')
+		.single();
+	if (res.error || !res.data) {
+		throw new Error(`closeSavingsAccount: ${res.error?.message ?? 'no row returned'}`);
+	}
+
+	return { account: toRecord(res.data), blocked: null };
 }

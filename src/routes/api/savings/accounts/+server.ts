@@ -47,9 +47,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		const account = await createSavingsAccount({ userId, type: 'simple', config });
 		await logSavingsEvent({
 			userId,
-			kind: 'simple_created',
+			kind: 'junior_created',
 			accountId: account.id,
 			payload: {
+				mode: 'simple',
 				name: typeof config.name === 'string' ? config.name : undefined,
 				selectedPoolId: config.selectedPoolId
 			}
@@ -70,9 +71,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const account = await createSavingsAccount({ userId, type: 'advanced', config, proposedAllocation });
 	await logSavingsEvent({
 		userId,
-		kind: 'advanced_accepted',
+		kind: 'senior_accepted',
 		accountId: account.id,
 		payload: {
+			mode: 'advanced',
 			name: config?.name,
 			riskPreference: config?.riskPreference,
 			nudges: config?.nudges ?? [],

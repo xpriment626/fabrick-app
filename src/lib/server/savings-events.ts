@@ -20,8 +20,6 @@ export type SavingsEventKind =
 	| 'senior_rerolled'
 	| 'senior_accepted'
 	| 'junior_created'
-	| 'advanced_accepted'
-	| 'simple_created'
 	| 'deposit_simulated';
 
 export type SavingsEventRecord = {

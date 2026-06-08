@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { PageData } from './$types';
 	import {
+		accountCloseBlock,
 		accountDisplayName,
 		accountModeLabel
 	} from '$lib/savings/accounts';
@@ -28,10 +29,14 @@
 	const wallet = $derived(data.walletSnapshot);
 
 	let extraAccounts = $state<SavingsAccountRecord[]>([]);
+	let closedAccountIds = $state<string[]>([]);
+	let accountOverrides = $state<Record<string, SavingsAccountRecord>>({});
 	const accounts = $derived<SavingsAccountRecord[]>([
 		...extraAccounts,
 		...(data.savingsAccounts ?? [])
-	]);
+	]
+		.map((account) => accountOverrides[account.id] ?? account)
+		.filter((account) => !closedAccountIds.includes(account.id)));
 	const simpleAccounts = $derived(accounts.filter((account) => account.type === 'simple'));
 	const advancedAccounts = $derived(accounts.filter((account) => account.type === 'advanced'));
 
@@ -40,6 +45,10 @@
 	let selectedMode = $state<SavingsAccountType>('simple');
 	let createPhase = $state<CreatePhase>('idle');
 	let createError = $state<string | null>(null);
+	let editingAccountId = $state<string | null>(null);
+	let renameDraft = $state('');
+	let accountActionBusy = $state<string | null>(null);
+	let accountActionError = $state<Record<string, string>>({});
 
 	let catalogue = $state<SavingsCatalogue | null>(null);
 	let catState = $state<'loading' | 'loaded' | 'error'>('loading');
@@ -88,6 +97,81 @@
 	function onAdvancedCreated(account: SavingsAccountRecord) {
 		extraAccounts = [account, ...extraAccounts];
 		stopCreate();
+	}
+
+	function updateLocalAccount(account: SavingsAccountRecord) {
+		extraAccounts = extraAccounts.map((item) => (item.id === account.id ? account : item));
+		accountOverrides = { ...accountOverrides, [account.id]: account };
+	}
+
+	function removeLocalAccount(accountId: string) {
+		extraAccounts = extraAccounts.filter((account) => account.id !== accountId);
+		closedAccountIds = [...closedAccountIds, accountId];
+	}
+
+	function beginRename(account: SavingsAccountRecord) {
+		editingAccountId = account.id;
+		renameDraft = accountDisplayName(account.config);
+		accountActionError = { ...accountActionError, [account.id]: '' };
+	}
+
+	function cancelRename() {
+		editingAccountId = null;
+		renameDraft = '';
+	}
+
+	async function renameAccount(account: SavingsAccountRecord) {
+		const name = renameDraft.trim();
+		if (!name) {
+			accountActionError = { ...accountActionError, [account.id]: 'Account name is required.' };
+			return;
+		}
+
+		accountActionBusy = account.id;
+		accountActionError = { ...accountActionError, [account.id]: '' };
+		try {
+			const res = await fetch(`/api/savings/accounts/${account.id}`, {
+				method: 'PATCH',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ name })
+			});
+			const body = await res.json();
+			if (!res.ok || !body?.account) throw new Error(body?.message ?? `rename failed (${res.status})`);
+			updateLocalAccount(body.account as SavingsAccountRecord);
+			cancelRename();
+		} catch (err) {
+			accountActionError = {
+				...accountActionError,
+				[account.id]: err instanceof Error ? err.message : String(err)
+			};
+		} finally {
+			accountActionBusy = null;
+		}
+	}
+
+	async function closeAccount(account: SavingsAccountRecord) {
+		const blocked = accountCloseBlock(account.config);
+		if (blocked) return;
+
+		accountActionBusy = account.id;
+		accountActionError = { ...accountActionError, [account.id]: '' };
+		try {
+			const res = await fetch(`/api/savings/accounts/${account.id}`, { method: 'DELETE' });
+			const body = await res.json();
+			if (res.status === 409 && body?.blocked?.message) {
+				accountActionError = { ...accountActionError, [account.id]: body.blocked.message };
+				return;
+			}
+			if (!res.ok || !body?.account) throw new Error(body?.message ?? `close failed (${res.status})`);
+			removeLocalAccount(account.id);
+		} catch (err) {
+			accountActionError = {
+				...accountActionError,
+				[account.id]: err instanceof Error ? err.message : String(err)
+			};
+		} finally {
+			accountActionBusy = null;
+		}
 	}
 
 	async function createSimpleAccount() {
@@ -485,6 +569,7 @@
 				<div class="grid gap-3">
 					{#each simpleAccounts as account (account.id)}
 						{@const pool = simpleAccountPool(account)}
+						{@const closeBlock = accountCloseBlock(account.config)}
 						<section class="rounded-[18px] border border-border bg-surface p-4 shadow-card">
 							<div class="flex items-start justify-between gap-4">
 								<div class="min-w-0">
@@ -519,10 +604,78 @@
 									</button>
 								{/if}
 							</div>
+							<div class="mt-4 rounded-[14px] bg-bg p-3">
+								{#if editingAccountId === account.id}
+									<label
+										class="mb-1.5 block text-[11.5px] font-semibold text-muted"
+										for={`rename-${account.id}`}
+									>
+										Account name
+									</label>
+									<div class="flex flex-col gap-2 sm:flex-row">
+										<input
+											id={`rename-${account.id}`}
+											bind:value={renameDraft}
+											class="min-w-0 flex-1 rounded-[10px] border border-border bg-surface px-3 py-2 text-[13px] font-semibold text-ink outline-none focus:border-ink"
+										/>
+										<div class="flex gap-2">
+											<button
+												type="button"
+												onclick={() => renameAccount(account)}
+												disabled={accountActionBusy === account.id}
+												class="rounded-[10px] bg-ink px-3 py-2 text-[12px] font-semibold text-surface transition-opacity hover:opacity-90 disabled:opacity-50"
+											>
+												Save
+											</button>
+											<button
+												type="button"
+												onclick={cancelRename}
+												class="rounded-[10px] border border-border bg-surface px-3 py-2 text-[12px] font-semibold text-ink transition-colors hover:bg-bg"
+											>
+												Cancel
+											</button>
+										</div>
+									</div>
+								{:else}
+									<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+										<div class="min-w-0">
+											<div class="text-[12px] font-semibold text-ink">Account controls</div>
+											{#if closeBlock}
+												<p class="mt-1 text-[12px] leading-relaxed text-warning">{closeBlock.message}</p>
+											{:else}
+												<p class="mt-1 text-[12px] text-muted">No active deposit recorded. This account can be closed.</p>
+											{/if}
+										</div>
+										<div class="flex shrink-0 gap-2">
+											<button
+												type="button"
+												onclick={() => beginRename(account)}
+												class="rounded-[10px] border border-border bg-surface px-3 py-2 text-[12px] font-semibold text-ink transition-colors hover:bg-bg"
+											>
+												Rename
+											</button>
+											<button
+												type="button"
+												onclick={() => closeAccount(account)}
+												disabled={Boolean(closeBlock) || accountActionBusy === account.id}
+												class="rounded-[10px] border border-negative/30 bg-surface px-3 py-2 text-[12px] font-semibold text-negative transition-colors hover:bg-negative/10 disabled:cursor-not-allowed disabled:border-border disabled:text-muted disabled:hover:bg-surface"
+											>
+												{accountActionBusy === account.id ? 'Closing…' : 'Close'}
+											</button>
+										</div>
+									</div>
+								{/if}
+								{#if accountActionError[account.id]}
+									<p class="mt-2 rounded-[8px] bg-negative/10 px-3 py-2 text-[12px] text-negative">
+										{accountActionError[account.id]}
+									</p>
+								{/if}
+							</div>
 						</section>
 					{/each}
 
 					{#each advancedAccounts as account (account.id)}
+						{@const closeBlock = accountCloseBlock(account.config)}
 						{#if account.proposedAllocation}
 							<SeniorAllocationCard
 								name={accountDisplayName(account.config, 'Advanced savings')}
@@ -532,6 +685,73 @@
 									? account.config.riskPreference
 									: undefined}
 							/>
+							<section class="rounded-[14px] bg-bg p-3">
+								{#if editingAccountId === account.id}
+									<label
+										class="mb-1.5 block text-[11.5px] font-semibold text-muted"
+										for={`rename-${account.id}`}
+									>
+										Account name
+									</label>
+									<div class="flex flex-col gap-2 sm:flex-row">
+										<input
+											id={`rename-${account.id}`}
+											bind:value={renameDraft}
+											class="min-w-0 flex-1 rounded-[10px] border border-border bg-surface px-3 py-2 text-[13px] font-semibold text-ink outline-none focus:border-ink"
+										/>
+										<div class="flex gap-2">
+											<button
+												type="button"
+												onclick={() => renameAccount(account)}
+												disabled={accountActionBusy === account.id}
+												class="rounded-[10px] bg-ink px-3 py-2 text-[12px] font-semibold text-surface transition-opacity hover:opacity-90 disabled:opacity-50"
+											>
+												Save
+											</button>
+											<button
+												type="button"
+												onclick={cancelRename}
+												class="rounded-[10px] border border-border bg-surface px-3 py-2 text-[12px] font-semibold text-ink transition-colors hover:bg-bg"
+											>
+												Cancel
+											</button>
+										</div>
+									</div>
+								{:else}
+									<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+										<div class="min-w-0">
+											<div class="text-[12px] font-semibold text-ink">Account controls</div>
+											{#if closeBlock}
+												<p class="mt-1 text-[12px] leading-relaxed text-warning">{closeBlock.message}</p>
+											{:else}
+												<p class="mt-1 text-[12px] text-muted">No active deposit recorded. This account can be closed.</p>
+											{/if}
+										</div>
+										<div class="flex shrink-0 gap-2">
+											<button
+												type="button"
+												onclick={() => beginRename(account)}
+												class="rounded-[10px] border border-border bg-surface px-3 py-2 text-[12px] font-semibold text-ink transition-colors hover:bg-bg"
+											>
+												Rename
+											</button>
+											<button
+												type="button"
+												onclick={() => closeAccount(account)}
+												disabled={Boolean(closeBlock) || accountActionBusy === account.id}
+												class="rounded-[10px] border border-negative/30 bg-surface px-3 py-2 text-[12px] font-semibold text-negative transition-colors hover:bg-negative/10 disabled:cursor-not-allowed disabled:border-border disabled:text-muted disabled:hover:bg-surface"
+											>
+												{accountActionBusy === account.id ? 'Closing…' : 'Close'}
+											</button>
+										</div>
+									</div>
+								{/if}
+								{#if accountActionError[account.id]}
+									<p class="mt-2 rounded-[8px] bg-negative/10 px-3 py-2 text-[12px] text-negative">
+										{accountActionError[account.id]}
+									</p>
+								{/if}
+							</section>
 						{/if}
 					{/each}
 				</div>
