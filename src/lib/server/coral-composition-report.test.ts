@@ -221,3 +221,32 @@ test('parseCoralCompositionOutput extracts loose specialist thread messages', ()
 	assert.equal(output.findings[1]?.specialist, 'liquidity');
 	assert.ok(output.keyWarnings.length >= 1);
 });
+
+test('parseCoralCompositionOutput ignores narrator instruction echoes and bounds loose findings', () => {
+	const state = {
+		threads: [
+			{
+				messages: [
+					{
+						senderName: 'account-narrator',
+						content:
+							'Smoke workflow: you will receive fixed selected pools + allocation preview weights. Please reply with concise findings ONLY. Selected pools (fixed): kamino:lend:Atj6UREVVwa7WxbF2EMKNyfmYUY1U1txughe2gjhcPDCo.'
+					},
+					{
+						senderName: 'capacity-concentration',
+						content:
+							'Capacity/Concentration findings for Balanced (amountUsd=1000): concentration is heavily Kamino (82.3% max venue; 99.9% across lending reserves). Within Kamino, three sleeves sum to 82.3% with the largest single sleeve Maple at 35.3%. Thin/fragmentation flags appear for Maple venue capacity, which may be less forgiving to incremental deposits even though current amount is modest. Preview-safe warning: concentration materially increases vs diversified stance if % to Kamino remains >80% - main risk is venue/capacity concentration rather than broad pool-count fragmentation. Rebalance'
+					}
+				]
+			}
+		]
+	};
+
+	const output = parseCoralCompositionOutput(state);
+	assert.ok(output);
+	assert.equal(output.findings.length, 1);
+	assert.equal(output.findings[0]?.specialist, 'capacity');
+	assert.doesNotMatch(output.findings[0]?.body ?? '', /Smoke workflow/);
+	assert.ok((output.findings[0]?.body.length ?? 0) <= 423);
+	assert.ok(output.keyWarnings.every((warning) => warning.length <= 263));
+});

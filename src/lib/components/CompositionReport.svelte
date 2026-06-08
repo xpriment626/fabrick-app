@@ -27,6 +27,11 @@
 	const pct = (value: number, decimals = 1) => `${value.toFixed(decimals)}%`;
 	const bps = (value: number) => `${value.toFixed(value < 1 ? 4 : 2)} bps`;
 	const max = (values: number[]) => Math.max(...values, 0.001);
+	function warningParts(warning: string): { title: string; body: string } {
+		const [first, ...rest] = warning.split(':');
+		if (!rest.length || first.length > 72) return { title: 'Review before funding', body: warning };
+		return { title: first.trim(), body: rest.join(':').trim() };
+	}
 	const apyMax = $derived(max(report.chartData.apyContribution.map((item) => item.valuePct)));
 	const riskMax = $derived(max(report.chartData.riskContribution.map((item) => item.value)));
 	const depthMax = $derived(max(report.chartData.depositDepth.map((item) => item.valueBps)));
@@ -44,18 +49,18 @@
 				{report.narratorCopy.overview}
 			</p>
 		</div>
-		<div class="grid min-w-[190px] grid-cols-2 gap-2 rounded-[14px] bg-bg p-3">
-			<div>
-				<div class="text-[22px] font-extrabold tracking-[-0.03em] text-ink">
+		<div class="grid w-full min-w-0 grid-cols-2 gap-2 rounded-[14px] bg-bg p-3 sm:w-auto sm:min-w-[250px]">
+			<div class="min-w-0">
+				<div class="metric-value font-extrabold tracking-[-0.03em] text-ink">
 					{report.summary.blendedApyPct.toFixed(2)}%
 				</div>
-				<div class="text-[11px] font-semibold text-muted">blended APY</div>
+				<div class="text-[11px] font-semibold leading-tight text-muted">blended APY</div>
 			</div>
-			<div>
-				<div class="text-[22px] font-extrabold tracking-[-0.03em] text-ink">
+			<div class="min-w-0">
+				<div class="metric-value font-extrabold tracking-[-0.03em] text-ink">
 					{usd(report.amountUsd)}
 				</div>
-				<div class="text-[11px] font-semibold text-muted">preview amount</div>
+				<div class="text-[11px] font-semibold leading-tight text-muted">preview amount</div>
 			</div>
 		</div>
 	</div>
@@ -157,20 +162,27 @@
 	<div class="mb-5 grid gap-3 sm:grid-cols-2">
 		<div class="rounded-[14px] bg-bg p-3">
 			<div class="eyebrow mb-1 text-muted">Weighting rationale</div>
-			<p class="text-[12.5px] leading-relaxed text-ink">{report.narratorCopy.weightingRationale}</p>
+			<p class="report-copy text-[12.5px] leading-relaxed text-ink">{report.narratorCopy.weightingRationale}</p>
 		</div>
 		<div class="rounded-[14px] bg-bg p-3">
 			<div class="eyebrow mb-1 text-muted">Rebalancing</div>
-			<p class="text-[12.5px] leading-relaxed text-ink">{report.narratorCopy.rebalancing}</p>
+			<p class="report-copy text-[12.5px] leading-relaxed text-ink">{report.narratorCopy.rebalancing}</p>
 		</div>
 	</div>
 
 	{#if report.keyWarnings.length}
-		<div class="mb-5 rounded-[14px] bg-warning/10 p-3" data-testid="composition-report-warnings">
+		<div class="mb-5 rounded-[14px] bg-warning/10 p-3.5" data-testid="composition-report-warnings">
 			<div class="eyebrow mb-2 text-warning">Warnings</div>
-			<div class="grid gap-1.5">
+			<div class="grid gap-2">
 				{#each report.keyWarnings as warning (warning)}
-					<p class="text-[12.5px] leading-relaxed text-ink">{warning}</p>
+					{@const parts = warningParts(warning)}
+					<div class="grid grid-cols-[10px_minmax(0,1fr)] gap-2 rounded-[10px] bg-surface/70 px-3 py-2">
+						<span class="mt-1.5 h-2 w-2 rounded-full bg-warning"></span>
+						<div class="min-w-0">
+							<div class="report-copy text-[12px] font-bold leading-snug text-ink">{parts.title}</div>
+							<p class="report-copy mt-0.5 text-[12px] leading-relaxed text-muted">{parts.body}</p>
+						</div>
+					</div>
 				{/each}
 			</div>
 		</div>
@@ -180,14 +192,16 @@
 		<div class="eyebrow mb-2 text-muted">Specialist findings</div>
 		<div class="grid gap-2 sm:grid-cols-2" data-testid="composition-report-findings">
 			{#each report.findings as finding (finding.specialist)}
-				<div class="rounded-[14px] bg-bg p-3">
-					<div class="mb-1 flex items-center justify-between gap-3">
-						<div class="text-[12px] font-bold text-ink">{finding.title}</div>
-						<div class="text-[10.5px] font-semibold {SEVERITY[finding.severity]}">
+				<div class="min-w-0 rounded-[14px] bg-bg p-3">
+					<div class="mb-1 flex items-start justify-between gap-3">
+						<div class="report-copy min-w-0 text-[12px] font-bold leading-snug text-ink">{finding.title}</div>
+						<div class="shrink-0 text-[10.5px] font-semibold {SEVERITY[finding.severity]}">
 							{SPECIALIST[finding.specialist]}
 						</div>
 					</div>
-					<p class="text-[12px] leading-relaxed text-muted">{finding.body}</p>
+					<p class="report-copy max-h-[210px] overflow-auto pr-1 text-[12px] leading-relaxed text-muted">
+						{finding.body}
+					</p>
 				</div>
 			{/each}
 		</div>
@@ -228,3 +242,16 @@
 		{/if}
 	</div>
 </section>
+
+<style>
+	.metric-value {
+		font-size: clamp(18px, 2.1vw, 22px);
+		line-height: 1.05;
+		overflow-wrap: anywhere;
+	}
+
+	.report-copy {
+		overflow-wrap: anywhere;
+		word-break: break-word;
+	}
+</style>

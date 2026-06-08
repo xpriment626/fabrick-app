@@ -155,3 +155,40 @@ test('buildCompositionReport overlays parsed Coral specialist output', () => {
 	assert.match(report.keyWarnings.join(' '), /Agent warning/);
 	assert.equal(report.findings.length, 6);
 });
+
+test('buildCompositionReport bounds structured agent copy and warnings', () => {
+	const longWarning =
+		'Narrator synthesis: Smoke workflow: you will receive fixed selected pools and a long list of selected opportunity ids including kamino:lend:Atj6UREVVwa7WxbF2EMKNyfmYUY1U1txughe2gjhcPDCo and kamino:lend:BnYNV7TdhwASUab7mQCRhzHvasjp8o8xmmvVtKnPe3Zi. This raw coordination text should not overwhelm the warnings card or create horizontal overflow in the report UI.';
+	const report = buildCompositionReport({
+		allocation,
+		amountUsd: 1000,
+		agentOutput: {
+			narratorCopy: {
+				overview:
+					'This is a deliberately long narrator overview that should be clipped into report-sized copy. It includes enough sentence structure to cut cleanly. It should not expand the header indefinitely or overflow the composition report card in narrow layouts.',
+				weightingRationale:
+					'This is a long weighting rationale. It should be useful, compact, and clipped before it becomes a pasted transcript.',
+				rebalancing:
+					'This is a long rebalancing explanation. It should be clipped before it becomes a pasted transcript.'
+			},
+			keyWarnings: [longWarning],
+			findings: [
+				{
+					specialist: 'capacity',
+					title:
+						'Capacity and concentration with a title that is far too long for a compact finding card and should be shortened',
+					severity: 'watch',
+					body: longWarning
+				}
+			]
+		},
+		pools,
+		riskPreference: 'balanced'
+	});
+
+	assert.ok(report.keyWarnings[0]!.length <= 263);
+	assert.doesNotMatch(report.keyWarnings[0]!, /Atj6UREV/);
+	assert.ok(report.findings.find((finding) => finding.specialist === 'capacity')!.title.length <= 75);
+	assert.ok(report.findings.find((finding) => finding.specialist === 'capacity')!.body.length <= 423);
+	assert.ok(report.narratorCopy.overview.length <= 363);
+});

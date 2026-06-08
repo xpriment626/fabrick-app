@@ -223,23 +223,48 @@ function buildChartData(rows: CompositionReportPool[]): CompositionReport['chart
 	};
 }
 
+function compactReportText(value: string, maxLength: number): string {
+	const cleaned = value
+		.replace(/\s+/g, ' ')
+		.replace(/\b(?:kamino|save|jupiter):[A-Za-z0-9:_-]{18,}\b/g, 'selected opportunity')
+		.replace(/\s+([,.;:])/g, '$1')
+		.trim();
+	if (cleaned.length <= maxLength) return cleaned;
+	const sentenceEnd = Math.max(
+		cleaned.lastIndexOf('. ', maxLength),
+		cleaned.lastIndexOf('; ', maxLength),
+		cleaned.lastIndexOf('? ', maxLength),
+		cleaned.lastIndexOf('! ', maxLength)
+	);
+	const cut = sentenceEnd > maxLength * 0.55 ? sentenceEnd + 1 : cleaned.lastIndexOf(' ', maxLength);
+	return `${cleaned.slice(0, cut > 0 ? cut : maxLength).trim()}...`;
+}
+
+function cleanFinding(finding: CompositionReportFinding): CompositionReportFinding {
+	return {
+		...finding,
+		title: compactReportText(finding.title, 72),
+		body: compactReportText(finding.body, 420)
+	};
+}
+
 function mergeFindings(
 	fallback: CompositionReportFinding[],
 	agentFindings: CompositionReportFinding[] | undefined
 ): CompositionReportFinding[] {
 	if (!agentFindings?.length) return fallback;
 	const bySpecialist = new Map<CompositionReportFinding['specialist'], CompositionReportFinding>();
-	for (const finding of fallback) bySpecialist.set(finding.specialist, finding);
-	for (const finding of agentFindings) bySpecialist.set(finding.specialist, finding);
+	for (const finding of fallback) bySpecialist.set(finding.specialist, cleanFinding(finding));
+	for (const finding of agentFindings) bySpecialist.set(finding.specialist, cleanFinding(finding));
 	return [...bySpecialist.values()];
 }
 
 function mergeWarnings(fallback: string[], agentWarnings: string[] | undefined): string[] {
 	const warnings = new Set<string>();
 	for (const warning of agentWarnings ?? []) {
-		if (warning.trim()) warnings.add(warning.trim());
+		if (warning.trim()) warnings.add(compactReportText(warning, 260));
 	}
-	for (const warning of fallback) warnings.add(warning);
+	for (const warning of fallback) warnings.add(compactReportText(warning, 260));
 	return [...warnings].slice(0, 6);
 }
 
@@ -264,11 +289,17 @@ export function buildCompositionReport(input: BuildCompositionReportInput): Comp
 			previewOnly: true
 		},
 		narratorCopy: {
-			overview: agentNarrator?.overview?.trim() || input.allocation.rationale,
+			overview: agentNarrator?.overview?.trim()
+				? compactReportText(agentNarrator.overview, 360)
+				: input.allocation.rationale,
 			weightingRationale:
-				agentNarrator?.weightingRationale?.trim() ||
+				(agentNarrator?.weightingRationale?.trim()
+					? compactReportText(agentNarrator.weightingRationale, 320)
+					: '') ||
 				`Weights are applied only across the pools the user selected, then rendered into a ${RISK_LABEL[input.riskPreference]} composition.`,
-			rebalancing: agentNarrator?.rebalancing?.trim() || input.allocation.rebalanceStrategy
+			rebalancing: agentNarrator?.rebalancing?.trim()
+				? compactReportText(agentNarrator.rebalancing, 320)
+				: input.allocation.rebalanceStrategy
 		},
 		pools,
 		findings: mergeFindings(fallbackFindings, input.agentOutput?.findings),

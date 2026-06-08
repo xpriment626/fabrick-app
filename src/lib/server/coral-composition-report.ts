@@ -272,6 +272,32 @@ function normalizeText(value: string): string {
 	return value.replace(/\s+/g, ' ').trim();
 }
 
+function compactText(value: string, maxLength: number): string {
+	const cleaned = normalizeText(value)
+		.replace(/\b(?:kamino|save|jupiter):[A-Za-z0-9:_-]{18,}\b/g, 'selected opportunity')
+		.replace(/\s+([,.;:])/g, '$1');
+	if (cleaned.length <= maxLength) return cleaned;
+	const sentenceEnd = Math.max(
+		cleaned.lastIndexOf('. ', maxLength),
+		cleaned.lastIndexOf('; ', maxLength),
+		cleaned.lastIndexOf('? ', maxLength),
+		cleaned.lastIndexOf('! ', maxLength)
+	);
+	const cut = sentenceEnd > maxLength * 0.55 ? sentenceEnd + 1 : cleaned.lastIndexOf(' ', maxLength);
+	return `${cleaned.slice(0, cut > 0 ? cut : maxLength).trim()}...`;
+}
+
+function looksLikeInstructionEcho(text: string): boolean {
+	const lower = text.toLowerCase();
+	return (
+		lower.includes('smoke workflow') ||
+		lower.includes('please reply with concise findings') ||
+		lower.includes('selected pools (fixed)') ||
+		lower.includes('input json:') ||
+		lower.includes('generate a fabrick advanced account composition report')
+	);
+}
+
 function stringifyMessageContent(value: unknown): string {
 	if (typeof value === 'string') return normalizeText(value);
 	if (Array.isArray(value)) {
@@ -340,6 +366,22 @@ function titleFromText(text: string, fallback: string): string {
 	return firstSentence.replace(/^[-*]\s*/, '');
 }
 
+function stripSpecialistPrefix(text: string, specialist: CompositionReportFinding['specialist']): string {
+	const label = SPECIALIST_ALIASES.find((entry) => entry.specialist === specialist);
+	const aliases = label?.aliases ?? [];
+	let cleaned = text;
+	for (const alias of aliases) {
+		const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		cleaned = cleaned.replace(new RegExp(`^${escaped}\\s*:?\\s*`, 'i'), '');
+	}
+	return cleaned
+		.replace(/^rate quality specialist\s*:\s*/i, '')
+		.replace(/^exit liquidity specialist\s*:\s*/i, '')
+		.replace(/^capacity\/concentration findings\s+for\s+[^:]+:\s*/i, '')
+		.replace(/^strategy exposure classification\s*\([^)]*\)\s*:\s*/i, '')
+		.trim();
+}
+
 function extractJsonBlock(text: string): unknown | null {
 	const markerIndex = text.lastIndexOf('FABRICK_REPORT_JSON');
 	if (markerIndex < 0) return null;
@@ -398,7 +440,10 @@ function parseMessageFindings(messages: CoralThreadMessage[]): CompositionReport
 	for (const message of messages) {
 		const entry = inferSpecialist(message);
 		if (!entry || seen.has(entry.specialist)) continue;
-		const body = normalizeText(message.text).slice(0, 700);
+		if (entry.specialist === 'narrator') continue;
+		if (looksLikeInstructionEcho(message.text)) continue;
+		const stripped = stripSpecialistPrefix(message.text, entry.specialist);
+		const body = compactText(stripped, 420);
 		if (body.length < 20) continue;
 		seen.add(entry.specialist);
 		findings.push({
@@ -413,8 +458,8 @@ function parseMessageFindings(messages: CoralThreadMessage[]): CompositionReport
 
 function extractWarnings(findings: CompositionReportFinding[]): string[] {
 	return findings
-		.filter((finding) => finding.severity !== 'info')
-		.map((finding) => `${finding.title}: ${finding.body}`)
+		.filter((finding) => finding.severity !== 'info' && finding.specialist !== 'narrator')
+		.map((finding) => compactText(`${finding.title}: ${finding.body}`, 260))
 		.slice(0, 4);
 }
 
