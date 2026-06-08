@@ -7,10 +7,7 @@
 
 import { getSavingsCatalogue } from '$lib/server/savings-mcp';
 import { loadWalletSnapshot } from '$lib/server/wallet';
-import {
-	walletSnapshot as fallbackWallet,
-	type WalletSnapshot
-} from '$lib/placeholder-data';
+import type { WalletSnapshot } from '$lib/placeholder-data';
 import type { SavingsCatalogue } from '$lib/savings/types';
 
 export const load = async ({ locals }) => {
@@ -22,6 +19,7 @@ export const load = async ({ locals }) => {
 	return {
 		catalogue: catalogueResult.catalogue,
 		catalogueError: catalogueResult.error,
+		user: locals.user,
 		walletSnapshot
 	};
 };
@@ -38,12 +36,12 @@ async function loadCatalogue(): Promise<{ catalogue: SavingsCatalogue | null; er
 	}
 }
 
-async function loadWalletPreview(address: string | null): Promise<WalletSnapshot> {
-	if (!address) return fallbackWallet;
+async function loadWalletPreview(address: string | null): Promise<WalletSnapshot | null> {
+	if (!address) return null;
 	try {
 		return await loadWalletSnapshot(address);
 	} catch (err) {
-		console.warn('[home] wallet preview fell back to placeholder:', err);
-		return fallbackWallet;
+		console.warn('[home] wallet preview unavailable:', err);
+		return null;
 	}
 }
