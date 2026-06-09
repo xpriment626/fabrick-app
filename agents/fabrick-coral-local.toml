@@ -14,10 +14,10 @@ include_marketplace_agents = false
 watch_local_agents = true
 local_agent_rescan_timer = "30s"
 local_agents = [
-  "/Users/bambozlor/Desktop/product-lab/fabrick/fabrick-app/agents/savings-specialists/opportunity-data-interpreter",
-  "/Users/bambozlor/Desktop/product-lab/fabrick/fabrick-app/agents/savings-specialists/rate-quality-specialist",
-  "/Users/bambozlor/Desktop/product-lab/fabrick/fabrick-app/agents/savings-specialists/exit-liquidity-specialist",
-  "/Users/bambozlor/Desktop/product-lab/fabrick/fabrick-app/agents/savings-specialists/capacity-concentration-specialist",
-  "/Users/bambozlor/Desktop/product-lab/fabrick/fabrick-app/agents/savings-specialists/strategy-exposure-specialist",
-  "/Users/bambozlor/Desktop/product-lab/fabrick/fabrick-app/agents/savings-specialists/account-strategy-narrator"
+  "/Users/bambozlor/Lab/fabrick/fabrick-app/agents/savings-specialists/opportunity-data-interpreter",
+  "/Users/bambozlor/Lab/fabrick/fabrick-app/agents/savings-specialists/rate-quality-specialist",
+  "/Users/bambozlor/Lab/fabrick/fabrick-app/agents/savings-specialists/exit-liquidity-specialist",
+  "/Users/bambozlor/Lab/fabrick/fabrick-app/agents/savings-specialists/capacity-concentration-specialist",
+  "/Users/bambozlor/Lab/fabrick/fabrick-app/agents/savings-specialists/strategy-exposure-specialist",
+  "/Users/bambozlor/Lab/fabrick/fabrick-app/agents/savings-specialists/account-strategy-narrator"
 ]

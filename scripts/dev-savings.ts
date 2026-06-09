@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const APP_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const DEFAULT_MCP_DIR = '/Users/bambozlor/Desktop/studio/savings-mcp';
+const DEFAULT_MCP_DIR = '/Users/bambozlor/Lab/savings-mcp';
 const DEFAULT_MCP_URL = 'http://127.0.0.1:8788/mcp';
 const DEFAULT_CORAL_API_URL = 'http://127.0.0.1:5555';
 const DEFAULT_CORAL_AUTH_KEY = 'dev';
